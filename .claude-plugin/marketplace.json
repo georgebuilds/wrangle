@@ -1,0 +1,15 @@
+{
+  "name": "wrangle",
+  "description": "Headless multi-agent wrangling for Claude Code",
+  "owner": { "name": "georgebuilds", "url": "https://github.com/georgebuilds" },
+  "plugins": [
+    {
+      "name": "wrangle",
+      "description": "Drive claude, opencode, agy and codex headlessly behind one interface, with cost-ranked model routing",
+      "source": "./",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["multi-model", "headless", "opencode", "codex", "gemini"]
+    }
+  ]
+}

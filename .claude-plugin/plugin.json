@@ -1,0 +1,8 @@
+{
+  "name": "wrangle",
+  "description": "Drive claude, opencode, agy and codex headlessly behind one interface, with cost-ranked model routing",
+  "version": "0.1.0",
+  "author": { "name": "georgebuilds", "url": "https://github.com/georgebuilds" },
+  "homepage": "https://github.com/georgebuilds/wrangle",
+  "keywords": ["multi-model", "headless", "opencode", "codex", "antigravity", "gemini"]
+}
