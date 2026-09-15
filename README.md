@@ -24,16 +24,38 @@ Then just ask, in your own words:
 
 > run this past Gemini Flash and tell me what it would do differently
 
-Or drive the wrapper yourself:
+### Driving the wrapper directly
+
+The skill runs `wrangle.py` for you, but it is an ordinary CLI you can script
+against. An installed plugin lives under a versioned path
+(`~/.claude/plugins/cache/wrangle/wrangle/<version>/`), so clone the repo rather
+than hardcoding that:
 
 ```bash
-S=~/.claude/plugins/marketplaces/wrangle/skills/wrangle/scripts/wrangle.py
+git clone https://github.com/georgebuilds/wrangle
+S=wrangle/skills/wrangle/scripts/wrangle.py
 
 python3 $S doctor                    # what is installed, authed, missing
 python3 $S resolve astra             # every route to a model, ranked, with prices
 python3 $S run --model "gemini flash" --prompt "..."
 python3 $S compare --models "astra,gemini flash,opus" --prompt "..."
+python3 $S selftest                  # verify the wrapper's own logic
 ```
+
+To point at a copy you already installed, ask the registry for its path instead of
+guessing:
+
+```bash
+python3 -c "import json,os;print(json.load(open(os.path.expanduser(
+  '~/.claude/plugins/installed_plugins.json')))['plugins']['wrangle@wrangle'][0]['installPath'])"
+```
+
+### Already using it as a plain skill?
+
+If you keep a copy at `~/.agents/skills/wrangle` or `~/.claude/skills/wrangle`,
+installing the plugin gives you two copies of the same skill. Pick one lane: either
+uninstall the plugin (`claude plugin uninstall wrangle@wrangle`) or remove the
+standalone copy.
 
 ## What it actually does
 
