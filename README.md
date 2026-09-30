@@ -1,172 +1,118 @@
 # wrangle
 
-Drive `claude`, `opencode`, `agy` and `codex` headlessly from whichever one you are
-already in.
+Use Claude Code, agy (Antigravity), and Codex through your existing subscriptions
+without leaving the coding harness you are working in. OpenCode can host the
+skill too; wrangle never launches OpenCode headlessly.
 
-Sometimes it is worth running something past a different model, whether for a second
-perspective, a cheaper pass on bulk work, or because one harness is simply stronger
-at the thing you are doing. Right now that means remembering which CLI can even
-reach the model, switching over to it, and shuttling context back and forth by hand.
+Ask for a second opinion, compare models, or pass work between them:
 
-`wrangle` is a Claude Code skill that knows the real CLI shapes, failure modes and
-cost traps of all four harnesses, plus a hardened wrapper that normalizes them
-behind one interface, so "run this with Astra" just works. If nothing you have
-installed can serve the model you asked for, it tells you what to install.
+> Ask Gemini Flash to review this diff.
+
+> Have Claude plan the change, then let Codex implement it.
+
+Wrangle selects the native harness for the requested model, passes along the
+context, and brings the result back. It does not compare API prices or fall back
+to paid API routes when a subscription is unavailable.
 
 ## Install
+
+As a Claude Code plugin:
 
 ```
 /plugin marketplace add georgebuilds/wrangle
 /plugin install wrangle@wrangle
 ```
 
-Then just ask, in your own words:
+For a standalone skill, copy `skills/wrangle/` into your harness's skill directory.
+The installed copy used to maintain this repo lives at `~/.agents/skills/wrangle`.
+Use either the plugin or a standalone copy in a given harness to avoid duplicates.
 
-> run this past Gemini Flash and tell me what it would do differently
+You need Python 3.9+ in a POSIX environment and at least one of `claude`, `agy`, or
+`codex` installed and signed in to the corresponding plan. The scripts are tested
+on macOS and use only the Python standard library.
 
-### Driving the wrapper directly
+## Routing
 
-The skill runs `wrangle.py` for you, but it is an ordinary CLI you can script
-against. An installed plugin lives under a versioned path
-(`~/.claude/plugins/cache/wrangle/wrangle/<version>/`), so clone the repo rather
-than hardcoding that:
+| Request | Default execution target |
+|---|---|
+| Claude models | Claude Code with your Claude subscription |
+| Gemini models | agy with your Google login |
+| OpenAI models | Codex with your ChatGPT plan |
+
+An explicit harness takes precedence. If you name only a harness, its configured
+model default is used. Native model aliases and discovered IDs keep version
+selection with the clients themselves. Model availability still depends on your
+account.
+
+## Keep the model roster current
+
+The roster helper reads Claude Code's initialization metadata, `agy models`, and
+Codex app-server's model list. It sends no inference prompts or entitlement probes.
+
+From a clone of this repo:
 
 ```bash
-git clone https://github.com/georgebuilds/wrangle
-S=wrangle/skills/wrangle/scripts/wrangle.py
-
-python3 $S doctor                    # what is installed, authed, missing
-python3 $S resolve astra             # every route to a model, ranked, with prices
-python3 $S run --model "gemini flash" --prompt "..."
-python3 $S compare --models "astra,gemini flash,opus" --prompt "..."
-python3 $S selftest                  # verify the wrapper's own logic
+python3 skills/wrangle/scripts/roster.py             # list all three harnesses
+python3 skills/wrangle/scripts/roster.py codex       # list just Codex
+python3 skills/wrangle/scripts/roster.py --refresh   # force a refresh
+python3 skills/wrangle/scripts/roster.py --offline   # read the cache only
 ```
 
-To point at a copy you already installed, ask the registry for its path instead of
-guessing:
+Normal reads refresh lists older than 24 hours. Force a refresh after updating a
+CLI, changing accounts, or encountering a model-availability error. There is no
+background service. Cached metadata lives in `~/.config/wrangle/roster/`, or under
+`WRANGLE_HOME` when set. A failed refresh retains the previous list with its old
+timestamp, a stale marker, and an error. Each CLI may also cache its own metadata.
+
+## Run directly
+
+The skill chooses the model; the runner takes its native ID or alias:
 
 ```bash
-python3 -c "import json,os;print(json.load(open(os.path.expanduser(
-  '~/.claude/plugins/installed_plugins.json')))['plugins']['wrangle@wrangle'][0]['installPath'])"
+S=skills/wrangle/scripts/wrangle.py
+python3 "$S" claude --model sonnet --cwd /path/to/repo --prompt-file /tmp/review.txt
+python3 "$S" codex --cwd /path/to/repo --prompt-file /tmp/task.txt --write
+python3 "$S" agy --model MODEL_ID_FROM_ROSTER --prompt 'Explain this approach'
 ```
 
-### Already using it as a plain skill?
+`--file` appends a text file and can be repeated. `--timeout` defaults to 900 seconds.
+`--dry-run` prints the command without executing it. `--effort` passes a native
+value unchanged; use the model roster and CLI notes to choose a supported value.
 
-If you keep a copy at `~/.agents/skills/wrangle` or `~/.claude/skills/wrangle`,
-installing the plugin gives you two copies of the same skill. Pick one lane: either
-uninstall the plugin (`claude plugin uninstall wrangle@wrangle`) or remove the
-standalone copy.
+The default is plan/read-only mode. `--write` permits authorized implementation.
+The runner checks subscription login for Claude and Codex, closes stdin, enforces
+a deadline, and returns JSON with `ok`, `text`, `error`, usage, and timing. A CLI's
+`reported_cost_usd` is a usage valuation, not proof of an extra subscription charge.
 
-## What it actually does
+For comparisons, the skill runs independent calls and reconciles their findings.
+For sequential work, it passes the relevant result to the next model. Writes to
+the same working tree are serialized or separated into worktrees.
 
-**Ranks routes, then lets you choose.** A model is usually reachable several ways at
-different prices. `resolve` shows all of them with the facts that separate them and
-you pick, because "cheapest" is frequently a tie and the tiebreakers are things only
-you know:
+See [the skill](skills/wrangle/SKILL.md) for the workflow and
+[CLI notes](skills/wrangle/reference/cli-notes.md) for invocation details.
 
-```
-5 route(s) for 'astra'
+### Upgrading from 0.1
 
-#  ROUTE                                         RUNG          IN/OUT $/Mtok (list)  CONTEXT
-------------------------------------------------------------------------------------------
- 1 codex:gpt-6-astra                             subscription  $10 / $50             1,050,000
-     > plan entitlement unverified; run `wrangle doctor --probe`
- 2 opencode:opencode/gpt-6-astra                 gateway       $10 / $50             1,050,000
-     > ~$1.3 cold-start tool overhead
- 3 opencode:openrouter/openai/gpt-6-astra-pro    gateway       $10 / $50             1,050,000
-     > ~$1.3 cold-start tool overhead
-```
-
-An alias names a *family*, never one pinned id, so `-pro` and `-fast` variants stay
-visible instead of being collapsed away.
-
-**Returns one shape no matter who ran it.** That is what makes it composable:
-
-```json
-{"ok": true, "cli": "agy", "model": "gemini-3.8-flash-medium",
- "route": "agy:gemini-3.8-flash-medium", "rung": "subscription",
- "text": "...", "exit_code": 0, "duration_s": 4.2, "cost_usd": null,
- "usage": {...}, "notes": [], "raw_path": "...", "argv": [...]}
-```
-
-**Translates the vocabulary instead of forwarding it.** Each CLI spells permissions
-and reasoning effort differently, and two of them fail hard on the wrong value:
-
-| Request | claude | agy | opencode | codex |
-|---|---|---|---|---|
-| `--read-only` | `--permission-mode plan` | `--mode plan` | `--agent plan` | `-s read-only` |
-| `--write` | `--permission-mode acceptEdits` | `--mode accept-edits` | default | `-s workspace-write` |
-| `--yolo` | `--dangerously-skip-permissions` | same | `--auto` | `-s danger-full-access` |
-
-The default denies writes on every CLI, including codex, whose own default is
-`workspace-write` with `approval: never`.
-
-## The traps it absorbs
-
-Every one of these was reproduced against the installed binaries, not read from
-vendor docs. Full detail with evidence in
-[`gotchas.md`](skills/wrangle/reference/gotchas.md).
-
-- **macOS has no `timeout(1)`.** Anything shelling out to it dies looking like an
-  agent crash. Deadlines are enforced in-process and kill the whole process group.
-- **agy silently truncates at five minutes.** `--print-timeout` defaults to `5m0s`.
-- **agy refuses `--model` and `--effort` together**, because the reasoning tier is
-  encoded in the model id. A tier change has to rewrite the id.
-- **codex never creates its `--output-last-message` file on failure.** Absent is not
-  the same as "the model said nothing".
-- **codex accepts an unknown model id with only a warning** and fails later at the
-  API, so you cannot validate a model by whether it starts.
-- **opencode emits one JSON object on error but a stream of them on success.** A
-  parser written against a failure breaks the first time the run works.
-- **opencode sends your entire MCP tool surface on every call.** Measured with eight
-  MCP servers: 352 tool declarations, 103,972 cache-write tokens, and **$1.30 for a
-  three-token prompt** on a $10/M model. Fan-out multiplies it, so `compare`
-  estimates the total and stops above a threshold.
-- **Gemini rejects opencode's tool schema outright** for the same reason, which is
-  why Gemini routes through agy instead.
-
-## Requirements
-
-macOS, Python 3.9+ (stdlib only, no pip install), and at least one of:
-
-| CLI | Install | Auth |
-|---|---|---|
-| claude | `brew install --cask claude-code` | `claude` then `/login` |
-| codex | `brew install codex` | `codex login` |
-| agy | `brew install antigravity-cli` | run `agy` once, Google sign-in |
-| opencode | `brew install opencode` | `opencode auth login` |
-
-More installed means more routes. `wrangle doctor` reports what you have and gives
-the install line for what you do not.
-
-Pricing comes from the models.dev catalog that opencode maintains on disk, so it is
-offline and free. Without opencode the routing still works and the price columns
-read `?`.
-
-## Privacy and portability
-
-This ships **no account-specific facts**. Which models your plan serves, which
-providers you are authed to, and which routes you prefer are discovered at runtime
-and cached under `~/.config/wrangle/`, never in the repo. Nothing is sent anywhere
-except to the CLI you asked for.
-
-`wrangle doctor --probe` learns your plan entitlements by making one cheap call per
-model. Rejections are free, cached, and expire so a plan upgrade is picked up.
+The old `run`, `resolve`, `compare`, `doctor`, `models`, `prefs`, and `selftest`
+subcommands have been removed. Run `wrangle.py HARNESS ...` for execution and
+`roster.py` for model discovery. Comparisons are coordinated by the calling agent.
+OpenCode execution, price ranking, automatic API fallback, and the custom alias
+catalog are no longer part of wrangle. Existing local preferences are not read.
 
 ## Development
 
-The canonical skill lives at `~/.agents/skills/wrangle` ([openagents
-layout](https://agents.md)); this repo is the distribution shell around it.
+The canonical skill lives at `~/.agents/skills/wrangle`; this repo packages it for
+distribution. Sync copies only the skill, not local model caches or account state.
 
 ```bash
-./sync.sh                                        # refresh skills/ from canonical, then validate
-python3 skills/wrangle/scripts/wrangle.py selftest
+./sync.sh
+python3 -m unittest discover -s skills/wrangle/scripts -p 'test_*.py'
 claude plugin validate . --strict
 ```
 
-`wrangle.py` is stdlib-only with no network calls of its own. To add a CLI, write a
-`run_<cli>` returning `(Result, stdout, stderr)`, register it in `RUNNERS`, and add a
-discovery method to `Router`. Run `selftest` after any change.
+`sync.sh` copies the canonical skill, runs the local tests, and validates the plugin
+when Claude Code is installed. Tests use fake CLI responses and spend no model
+quota. To sync from another location, set `WRANGLE_SRC`.
 
 ## License
 

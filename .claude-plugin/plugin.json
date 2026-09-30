@@ -1,8 +1,19 @@
 {
   "name": "wrangle",
-  "description": "Drive claude, opencode, agy and codex headlessly behind one interface, with cost-ranked model routing",
-  "version": "0.1.0",
-  "author": { "name": "georgebuilds", "url": "https://github.com/georgebuilds" },
+  "description": "Use Claude Code, agy, and Codex through existing subscriptions, with cross-model workflows and native model roster refresh",
+  "version": "0.2.0",
+  "author": {
+    "name": "georgebuilds",
+    "url": "https://github.com/georgebuilds"
+  },
   "homepage": "https://github.com/georgebuilds/wrangle",
-  "keywords": ["multi-model", "headless", "opencode", "codex", "antigravity", "gemini"]
+  "keywords": [
+    "multi-model",
+    "subscriptions",
+    "claude-code",
+    "opencode",
+    "codex",
+    "antigravity",
+    "gemini"
+  ]
 }

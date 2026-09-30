@@ -17,6 +17,7 @@ cp -R "$SRC" "$DEST"
 find "$DEST" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 echo "sync: $SRC -> $DEST"
+python3 -m unittest discover -s "$DEST/scripts" -p 'test_*.py'
 if command -v claude >/dev/null 2>&1; then
   claude plugin validate "$(dirname "$(dirname "$DEST")")" --strict
 fi

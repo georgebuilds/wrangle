@@ -1,152 +1,111 @@
 ---
 name: wrangle
-description: Drive another coding agent headlessly from wherever you already are. Use when someone wants to run a prompt through a specific model or harness ("run this with Astra", "get a second opinion from Gemini Flash", "what would Codex say"), compare several models on the same task, or pick the cheapest way to reach a model. Knows the CLI shapes, failure modes and cost traps of claude, opencode, agy (Antigravity) and codex, and ships a hardened wrapper that normalizes all four behind one interface. Also handles "which harness do I need for model X" and how to install it.
+description: Use Claude Code, agy (Antigravity), and Codex through existing subscriptions without leaving the current coding harness. Use for cross-model second opinions, comparisons, delegated work, and choosing which of these CLIs should run a task. Works from OpenCode too; never launches OpenCode headlessly.
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
 
 # wrangle
 
-Run a prompt through another harness without leaving the one you are in.
+Stay in the current harness and send work to Claude Code, agy, or Codex using the
+person's existing plans. OpenCode can be the host invoking this skill; it is never
+an execution target. Do not look up OpenCode providers, API rates, or gateway routes.
 
-Four CLIs can drive a model headlessly on a Mac: `claude`, `opencode`, `agy`
-(Antigravity) and `codex`. They differ on every detail that matters, and several
-of those details cost real money when you get them wrong. This skill carries the
-knowledge, and `scripts/wrangle.py` carries the mechanics.
+## Choose the target
+
+Honor an explicit harness first. Otherwise use the model's native harness:
+
+| Requested model | Harness | Model selection |
+|---|---|---|
+| Claude, Opus, Sonnet, Haiku, Fable | `claude` | Use a native alias such as `sonnet`, or preserve an exact model ID |
+| Gemini, Flash, Gemini Pro | `agy` | Choose the matching ID from the refreshed roster |
+| GPT, Astra, Sol, or another OpenAI model | `codex` | Use the refreshed roster to resolve a family name; preserve exact IDs |
+
+If only a harness is named, omit `--model` and use its configured default. For an
+unspecified second opinion, use another available subscription harness, announce
+which, and proceed. Ask only if ambiguity would materially change the requested
+work. An explicit model that is unavailable is a reason to report the limitation,
+not silently substitute another model or buy API usage.
+
+Use discovery only where needed. Claude's native aliases avoid pinning versions.
+Use the roster below for family-name resolution and questions about available models.
+Metadata is a hint, not proof of plan entitlement. Do not invent aliases or probe
+every model.
+
+## Keep the roster current
+
+Locate `scripts/roster.py` relative to this skill. It queries the native model lists
+without sending a prompt or starting an inference turn:
 
 ```bash
-S=~/.agents/skills/wrangle/scripts/wrangle.py
-
-python3 $S doctor                       # what is installed, authed, missing
-python3 $S resolve astra                # every route to a model, ranked, with prices
-python3 $S run --model astra --prompt "..."
-python3 $S compare --models "astra,gemini flash,opus" --prompt "..."
-python3 $S models astra                 # who serves it, including who you cannot reach
-python3 $S prefs set astra codex:gpt-6-astra
-python3 $S selftest
+python3 /path/to/wrangle/scripts/roster.py                 # all three harnesses
+python3 /path/to/wrangle/scripts/roster.py agy             # only the needed harness
+python3 /path/to/wrangle/scripts/roster.py --refresh       # force refresh now
+python3 /path/to/wrangle/scripts/roster.py --offline       # cached lists only
 ```
 
-## The one rule: rank, then let the human choose
+Normal reads refresh missing lists and lists older than 24 hours. Force a refresh
+after a CLI update, account change, model-availability failure, or a request for
+the latest roster. This runs on demand; there is no background job to install.
+Match family names against returned IDs/names and use returned effort options.
 
-Cheapest-first is a **ranking hint, not a decision**. `resolve` lists every route
-with the facts that separate them and the caller picks. This matters more than it
-sounds: for some models every provider charges exactly the same, so an automatic
-"cheapest" pick is a coin flip that silently hides the `-pro` and `-fast` variants
-and the one with a smaller context window.
+Lists live in `~/.config/wrangle/roster/` (or `$WRANGLE_HOME/roster/`), outside the
+shared skill. Each has a fetch timestamp. Failed refreshes retain the last good
+list with `stale: true` and an error; never describe that list as current. Exit 1
+can mean a partial result: inspect each harness. Missing CLIs do not hide the others.
+Native CLIs may themselves cache metadata; this reports their current roster, not
+a guarantee that a newly announced model is already available to the account.
 
-Order of precedence when choosing a route:
+## Run the work
 
-1. `--route` passed explicitly
-2. a remembered preference (`prefs set`)
-3. `--pick cheapest|fastest|first` for non-interactive callers
-4. otherwise **ask**, showing `resolve` output
+Read [CLI notes](reference/cli-notes.md) for the chosen harness. Locate
+`scripts/wrangle.py` relative to **this SKILL.md**, not the working repository.
+The runner takes a harness and optional native model name. It handles deadlines,
+closed stdin, subscription checks for Claude/Codex, and JSON result extraction.
 
-An alias names a *family*, never one pinned id. `astra` resolves to every Astra
-variant so the caller sees that `-pro` exists. An alias that collapses variants is
-a bug.
-
-## Cost rungs
-
-| Rung | Meaning | Examples |
-|---|---|---|
-| `subscription` | included in a plan you already pay for | claude on your plan, codex on ChatGPT auth, agy on Google login |
-| `direct` | a first-party API key, billed per token | `google/`, `openai/`, `cerebras/` |
-| `gateway` | a reseller, billed per token | OpenRouter, OpenCode Zen |
-
-A subscription rung still shows the model's list price, labelled `(list)`, so you
-can see what the same call would cost elsewhere.
-
-## Doing the work
-
-**Someone names a model.** Run `resolve`. If exactly one route exists, use it. If
-several do, show the table and ask, unless a preference is already remembered.
-Offer to remember the answer with `prefs set`.
-
-**Someone wants a second opinion or a comparison.** Use `compare`. It runs the
-routes in parallel and returns one envelope per model. It refuses to start when the
-estimated cold-start overhead exceeds `--confirm-over` (default $1) without
-`--yes`, because fan-out multiplies that overhead by the number of models.
-
-**Someone names a model nothing installed can reach.** `resolve` exits 3 and lists
-the providers that *do* serve it. `models <query>` shows the same with a `+` against
-the ones reachable today. Installation is always Homebrew:
-
-| CLI | Install | Auth |
-|---|---|---|
-| claude | `brew install --cask claude-code` | `claude` then `/login` |
-| codex | `brew install codex` | `codex login` |
-| agy | `brew install antigravity-cli` | run `agy` once, Google sign-in |
-| opencode | `brew install opencode` | `opencode auth login` |
-
-Prefer the harness whose vendor owns the model (`agy` for Gemini, `codex` for
-OpenAI, `claude` for Claude) when it is on a subscription rung, because that route
-is both cheapest and least likely to hit a schema mismatch. `opencode` is the
-universal fallback and the only way to reach GLM, Kimi, Qwen, Grok and similar.
-
-## Permissions and effort are translated, not forwarded
-
-Each CLI spells these differently and two of them fail hard on the wrong value, so
-`wrangle` owns the vocabulary and maps it per CLI.
-
-| Request | claude | agy | opencode | codex |
-|---|---|---|---|---|
-| `--read-only` | `--permission-mode plan` | `--mode plan` | `--agent plan` | `-s read-only` |
-| `--write` | `--permission-mode acceptEdits` | `--mode accept-edits` | default | `-s workspace-write` |
-| `--yolo` | `--dangerously-skip-permissions` | same | `--auto` | `-s danger-full-access` |
-
-**The default denies writes on every CLI**, including codex, whose own default is
-`workspace-write` with `approval: never`. A `compare` across four models asks a
-question; it must not edit your tree to answer it.
-
-`--effort` uses claude's five-step scale and is clamped to what each CLI accepts
-(agy and codex cap at `high`; opencode has no effort flag and uses `--variant`).
-A step-down is reported in `notes`, never silent. On agy the tier lives in the
-model id, so an effort request rewrites the id instead of adding a flag.
-
-## The result envelope
-
-Every run returns the same shape regardless of which CLI produced it, which is what
-makes this composable:
-
-```json
-{"ok": true, "cli": "agy", "model": "gemini-3.8-flash-medium",
- "route": "agy:gemini-3.8-flash-medium", "rung": "subscription",
- "text": "...", "exit_code": 0, "duration_s": 4.2, "cost_usd": null,
- "usage": {...}, "session_id": "...", "error": null,
- "raw_path": "~/.config/wrangle/runs/...log", "argv": [...]}
+```bash
+# S is the absolute path to this skill's scripts/wrangle.py.
+python3 "$S" claude --model sonnet --cwd /path/to/repo --prompt-file /tmp/question.txt
+python3 "$S" codex --cwd /path/to/repo --prompt-file /tmp/task.txt --write
+python3 "$S" agy --model <id-from-agy-models> --cwd /path/to/repo --prompt-file /tmp/question.txt
 ```
 
-`notes` carries anything the wrapper changed on your behalf: an effort step-down,
-an agy tier rewrite, a `--read-only` that an explicit `--agent` overrode.
+`--file path` appends a text file's contents; it is repeatable. Prompts also accept
+`--prompt` or stdin. Prefer prompt files for long text or shell-sensitive content.
+`--timeout` defaults to 900 seconds. `--dry-run` shows the command without executing
+or checking auth. `--effort` passes a native value unchanged; omit it unless requested
+or needed. On agy, select a tiered model ID instead of adding a conflicting effort flag.
 
-`cost_usd` is `null` when genuinely unknown, never `0`. A subscription run has no
-per-call cost; that is not the same as free work.
+The default is plan/read-only mode. Use `--write` for authorized implementation.
+These modes are CLI permission controls, not a guarantee against every configured
+hook or external tool side effect. Do not bypass a refusal by broadening permissions.
+Direct native invocation is fine for features the small runner does not expose,
+such as resuming a session; preserve the same auth, scope, and deadline constraints.
 
-Exit codes: `0` ok, `1` the agent ran and failed, `2` usage, `3` no route,
-`4` prerequisite missing, `5` timeout, `6` internal.
+## Pass context between models
 
-## Portability
+A new process does not inherit this conversation. Give it the objective, relevant
+files or diff, constraints, expected output, and whether it may edit. Set `--cwd`
+to the actual repository so its project instructions load. Do not send credentials.
 
-This skill ships **no account-specific facts**. Which models your plan serves, which
-providers you are authed to and which routes you prefer are discovered at runtime
-and cached in `~/.config/wrangle/`, never in the skill directory. That is what makes
-it shareable. When you learn a per-account fact, write it to local state, not here.
+For comparisons, give each model the same question and evidence independently,
+then reconcile agreements and disagreements against the code. Run independent
+read-only calls concurrently when useful. For a chain, pass the relevant output
+from one stage to the next, for example Claude's plan to Codex for implementation,
+then the resulting diff to Gemini for review. Serialize writes to the same tree or
+use separate worktrees. A second opinion alone does not authorize applying changes.
 
-`doctor --probe` discovers plan entitlements by making a cheap call per model.
-Rejections are free and are cached so a rejected model stops being offered.
+Inspect `ok` and `error`, not just whether text exists. Summarize the findings and
+name the harness/model that produced them. `reported_cost_usd` is the CLI's reported
+usage valuation, not proof of an extra subscription charge. Unknown cost stays null.
+On auth, quota, or model availability failures, report the actual issue. Use an
+alternative only if the request leaves that choice open; never fall back to paid APIs.
 
-## Reference
+## Scope and maintenance
 
-Read these before changing how a CLI is invoked. Each documents flags verified
-against the installed binary, not the vendor's docs.
+Keep account details, plan entitlements, and personal defaults out of the shared
+skill. The runner uses installed login state; only the roster helper caches model metadata.
+It has no price ranking, provider discovery, automatic fallback, or OpenCode runner.
+Do not enable extra usage or change account/billing settings to complete a call.
 
-- [`reference/capability-matrix.md`](reference/capability-matrix.md) - all four CLIs side by side
-- [`reference/gotchas.md`](reference/gotchas.md) - **the traps, each with its evidence**
-- [`reference/model-routing.md`](reference/model-routing.md) - how a name becomes a command
-- [`reference/claude-code.md`](reference/claude-code.md) · [`opencode.md`](reference/opencode.md) · [`agy.md`](reference/agy.md) · [`codex.md`](reference/codex.md)
-
-## Extending
-
-`wrangle.py` is stdlib-only Python with no network calls of its own. To add a CLI,
-write a `run_<cli>` returning `(Result, stdout, stderr)`, register it in `RUNNERS`,
-and add a discovery method to `Router`. Run `selftest` after any change; it covers
-the stream decoder, the ranking, the plan-gap detector and the timeout killer.
+Validate edits with `python3 -m unittest discover -s scripts -p 'test_*.py'` from this
+skill directory. Tests use fake CLI output and make no model calls.
