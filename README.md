@@ -6,7 +6,7 @@ skill too; wrangle never launches OpenCode headlessly.
 
 Ask for a second opinion, compare models, or pass work between them:
 
-> Ask Gemini Flash to review this diff.
+> Ask Argon to review this diff.
 
 > Have Claude plan the change, then let Codex implement it.
 
@@ -36,7 +36,7 @@ on macOS and use only the Python standard library.
 | Request | Default execution target |
 |---|---|
 | Claude models | Claude Code with your Claude subscription |
-| Gemini models | agy with your Google login |
+| Gemini models, including Argon | agy with your Google login |
 | OpenAI models | Codex with your ChatGPT plan |
 
 An explicit harness takes precedence. If you name only a harness, its configured

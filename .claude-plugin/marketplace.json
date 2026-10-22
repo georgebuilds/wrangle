@@ -10,7 +10,7 @@
       "name": "wrangle",
       "description": "Use Claude Code, agy, and Codex through existing subscriptions, with cross-model workflows and native model roster refresh",
       "source": "./",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "category": "productivity",
       "tags": [
         "multi-model",
