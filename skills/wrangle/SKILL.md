@@ -17,8 +17,11 @@ Honor an explicit harness first. Otherwise use the model's native harness:
 | Requested model | Harness | Model selection |
 |---|---|---|
 | Claude, Opus, Sonnet, Haiku, Fable | `claude` | Use a native alias such as `sonnet`, or preserve an exact model ID |
-| Gemini, Flash, Gemini Pro | `agy` | Choose the matching ID from the refreshed roster |
+| Gemini, Argon, Flash, Gemini Pro | `agy` | Choose the matching ID from the refreshed roster |
 | GPT, Astra, Sol, or another OpenAI model | `codex` | Use the refreshed roster to resolve a family name; preserve exact IDs |
+
+"Do X with Argon" means use `agy` and resolve Argon against its current roster,
+preserving any requested tier. Fable and Astra likewise select their native harnesses above.
 
 If only a harness is named, omit `--model` and use its configured default. For an
 unspecified second opinion, use another available subscription harness, announce
