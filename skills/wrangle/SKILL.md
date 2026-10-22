@@ -75,6 +75,13 @@ python3 "$S" agy --model <id-from-agy-models> --cwd /path/to/repo --prompt-file 
 or checking auth. `--effort` passes a native value unchanged; omit it unless requested
 or needed. On agy, select a tiered model ID instead of adding a conflicting effort flag.
 
+Results are JSON. Answers up to 4 KiB stay in `text`; larger answers are written to
+a private temporary `.txt` file, and the JSON contains `file`, `bytes`, and `lines`
+instead of reprinting the answer. Read only the relevant parts, or pass the file
+directly to another run with `--file` or `--prompt-file`. Use `--output-dir <scratchpad>`
+to keep large answers in a chosen scratch directory; otherwise the runner uses the
+system temporary directory. `--inline` forces the full answer into JSON when needed.
+
 The default is plan/read-only mode. Use `--write` for authorized implementation.
 These modes are CLI permission controls, not a guarantee against every configured
 hook or external tool side effect. Do not bypass a refusal by broadening permissions.
@@ -90,7 +97,8 @@ to the actual repository so its project instructions load. Do not send credentia
 For comparisons, give each model the same question and evidence independently,
 then reconcile agreements and disagreements against the code. Run independent
 read-only calls concurrently when useful. For a chain, pass the relevant output
-from one stage to the next, for example Claude's plan to Codex for implementation,
+from one stage to the next, using the returned `file` path for large answers instead
+of echoing them into the conversation. For example, pass Claude's plan to Codex for implementation,
 then the resulting diff to Gemini for review. Serialize writes to the same tree or
 use separate worktrees. A second opinion alone does not authorize applying changes.
 

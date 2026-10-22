@@ -13,6 +13,9 @@ import tempfile
 import time
 
 
+MAX_INLINE_BYTES = 4096
+
+
 class Failure(Exception):
     def __init__(self, message, code=1):
         super().__init__(message)
@@ -142,6 +145,27 @@ def parse_result(harness, code, out, err, last):
     return result
 
 
+def store_large_answer(result, inline=False, output_dir=None):
+    """Keep large answers out of stdout while leaving short results unchanged."""
+    answer = result.get("text") or ""
+    rendered = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
+    content = rendered.encode("utf-8")
+    if inline or len(content) <= MAX_INLINE_BYTES:
+        return result
+    directory = output_dir.expanduser().resolve() if output_dir else Path(tempfile.gettempdir())
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix="wrangle-answer-", suffix=".txt", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+    except BaseException:
+        Path(name).unlink(missing_ok=True)
+        raise
+    result.pop("text", None)
+    result.update(file=name, bytes=len(content), lines=len(rendered.splitlines()))
+    return result
+
+
 def parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("harness", choices=("claude", "agy", "codex"))
@@ -157,6 +181,8 @@ def parser():
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--read-only", action="store_true", help="default")
     ap.add_argument("--dry-run", action="store_true", help="print argv without auth checks or execution")
+    ap.add_argument("--inline", action="store_true", help="print even large answers in the JSON result")
+    ap.add_argument("--output-dir", type=Path, help="scratch directory for large answer files")
     return ap
 
 
@@ -188,6 +214,7 @@ def main(argv=None):
             result = parse_result(args.harness, code, out, err, last)
             result.update(harness=args.harness, model=args.model, exit_code=code,
                           duration_s=round(time.monotonic() - started, 2))
+            store_large_answer(result, inline=args.inline, output_dir=args.output_dir)
             print(json.dumps(result))
             return 0 if result["ok"] else 1
     except (Failure, OSError, UnicodeError) as exc:

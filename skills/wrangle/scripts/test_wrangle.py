@@ -130,6 +130,51 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(json.loads(proc.stdout)['text'], 'answer')
 
+    def test_large_answer_is_file_backed_with_inline_override(self):
+        answer = 'First line\n' + 'x' * 5000
+        binary = self.root / 'agy'
+        binary.write_text('#!' + sys.executable + '\nimport json\n'
+                          + f'print(json.dumps(dict(status="SUCCESS", response={answer!r})))\n')
+        binary.chmod(0o755)
+        with patch.dict(os.environ, {'PATH': str(self.root)}):
+            compact = subprocess.run(
+                [sys.executable, str(Path(w.__file__)), 'agy', '--prompt', 'question',
+                 '--output-dir', str(self.root)], capture_output=True, text=True, timeout=5)
+            inline = subprocess.run(
+                [sys.executable, str(Path(w.__file__)), 'agy', '--prompt', 'question', '--inline'],
+                capture_output=True, text=True, timeout=5)
+        self.assertEqual(compact.returncode, 0, compact.stderr)
+        result = json.loads(compact.stdout)
+        self.assertNotIn('text', result)
+        self.assertEqual(result['bytes'], len(answer.encode('utf-8')))
+        self.assertEqual(result['lines'], 2)
+        path = Path(result['file'])
+        self.assertEqual(path.parent.resolve(), self.root.resolve())
+        self.assertEqual(path.read_text(encoding='utf-8'), answer)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(inline.stdout)['text'], answer)
+
+    def test_codex_answer_survives_runner_cleanup(self):
+        answer = 'Codex answer\n' + 'y' * 5000
+        binary = self.root / 'codex'
+        binary.write_text(
+            '#!' + sys.executable + '\nimport json, sys\nfrom pathlib import Path\n'
+            'if sys.argv[1:3] == ["login", "status"]:\n'
+            '    print("Logged in using ChatGPT")\n'
+            'else:\n'
+            f'    Path(sys.argv[sys.argv.index("-o") + 1]).write_text({answer!r})\n'
+            '    print(json.dumps(dict(type="turn.completed", usage={})))\n'
+        )
+        binary.chmod(0o755)
+        with patch.dict(os.environ, {'PATH': str(self.root)}):
+            proc = subprocess.run(
+                [sys.executable, str(Path(w.__file__)), 'codex', '--prompt', 'question',
+                 '--output-dir', str(self.root)], capture_output=True, text=True, timeout=5)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout)
+        self.assertNotIn('text', result)
+        self.assertEqual(Path(result['file']).read_text(encoding='utf-8'), answer)
+
 
 if __name__ == '__main__':
     unittest.main()

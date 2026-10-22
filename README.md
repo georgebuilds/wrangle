@@ -81,12 +81,17 @@ value unchanged; use the model roster and CLI notes to choose a supported value.
 
 The default is plan/read-only mode. `--write` permits authorized implementation.
 The runner checks subscription login for Claude and Codex, closes stdin, enforces
-a deadline, and returns JSON with `ok`, `text`, `error`, usage, and timing. A CLI's
+a deadline, and returns JSON with `ok`, `error`, usage, and timing. Answers up to
+4 KiB are included in `text`; larger answers are saved to a private temporary file
+and returned as `file`, `bytes`, and `lines`. Use `--output-dir` to choose the
+scratch directory, or `--inline` to include the full answer in JSON. A CLI's
 `reported_cost_usd` is a usage valuation, not proof of an extra subscription charge.
 
 For comparisons, the skill runs independent calls and reconciles their findings.
-For sequential work, it passes the relevant result to the next model. Writes to
-the same working tree are serialized or separated into worktrees.
+For sequential work, it passes the relevant result to the next model. Large
+answers can be passed directly with `--file` or `--prompt-file`, without copying
+them into the conversation. Writes to the same working tree are serialized or
+separated into worktrees.
 
 See [the skill](skills/wrangle/SKILL.md) for the workflow and
 [CLI notes](skills/wrangle/reference/cli-notes.md) for invocation details.
