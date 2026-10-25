@@ -99,6 +99,11 @@ to keep large answers in a chosen scratch directory; otherwise the runner uses t
 system temporary directory. `--inline` forces the full answer into JSON when needed.
 
 The default is plan/read-only mode. Use `--write` for authorized implementation.
+**A write run cannot commit.** Codex's `workspace-write` sandbox and Claude's
+`acceptEdits` both refuse writes under `.git`, so a prompt that ends with "commit
+the result" ends with an uncommitted tree and a report saying so. Ask for the
+implementation and the verification output, then review the diff and commit from
+the host yourself.
 These modes are CLI permission controls, not a guarantee against every configured
 hook or external tool side effect. Do not bypass a refusal by broadening permissions.
 Direct native invocation is fine for features the small runner does not expose,

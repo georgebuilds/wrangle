@@ -66,7 +66,8 @@ and the [CLI reference](https://code.claude.com/docs/en/cli-reference).
 - Omit `-m` for the configured default. A family nickname must be resolved to a native
   ID before passing it; an unrecognized model can fail only after the request starts.
   A "not supported ... with a ChatGPT account" error describes account availability.
-- `-s workspace-write` permits implementation. Read-only is explicit for reviews.
+- `-s workspace-write` permits implementation. Read-only is explicit for reviews. Neither
+  can write under `.git`: a `git commit` fails on `.git/index.lock`, so commit from the host.
 - Effort is `-c 'model_reasoning_effort="VALUE"'`; preserve supported requested values
   instead of assuming every model has the same ceiling.
 - Speed is `-c 'service_tier="fast"'` or `"ultrafast"`, a config key with no CLI flag of
