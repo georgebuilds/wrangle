@@ -78,6 +78,19 @@ python3 "$S" agy --model <id-from-agy-models> --cwd /path/to/repo --prompt-file 
 or checking auth. `--effort` passes a native value unchanged; omit it unless requested
 or needed. On agy, select a tiered model ID instead of adding a conflicting effort flag.
 
+**"Fast" and "ultrafast" are Codex service tiers, not efforts.** The roster lists
+efforts only, so a tier never appears there. Pass `--service-tier ultrafast` (Codex
+only); it becomes `-c service_tier="ultrafast"`. Without the flag the person's
+`~/.codex/config.toml` decides, so check it before claiming a run was or was not on a
+tier. `--config KEY=VALUE` (repeatable) passes any other Codex setting the runner does
+not name. The result JSON carries `service_tier` only when the flag was given.
+
+**An implementation run outlasts a foreground tool call.** A harness's shell tool
+caps a foreground command at around ten minutes, while a write-mode run of a real
+plan takes an hour or more. Start it in the background with `--timeout` set to the
+whole budget and `--result-file <scratchpad>/result.json`, then read that file when
+the process exits instead of parsing captured stdout.
+
 Results are JSON. Answers up to 4 KiB stay in `text`; larger answers are written to
 a private temporary `.txt` file, and the JSON contains `file`, `bytes`, and `lines`
 instead of reprinting the answer. Read only the relevant parts, or pass the file

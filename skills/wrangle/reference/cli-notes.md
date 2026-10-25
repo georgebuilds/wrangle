@@ -69,6 +69,9 @@ and the [CLI reference](https://code.claude.com/docs/en/cli-reference).
 - `-s workspace-write` permits implementation. Read-only is explicit for reviews.
 - Effort is `-c 'model_reasoning_effort="VALUE"'`; preserve supported requested values
   instead of assuming every model has the same ceiling.
+- Speed is `-c 'service_tier="fast"'` or `"ultrafast"`, a config key with no CLI flag of
+  its own and no entry in the model list. `~/.codex/config.toml` may already set it; a
+  `-c` override wins for that run only.
 - JSONL has `item.completed` / `agent_message` for text, `turn.completed` for usage,
   and `error` or `turn.failed` on failure. The answer file may be absent on failure.
 - Close stdin (`</dev/null`) when supplying a prompt argument. A hanging inherited

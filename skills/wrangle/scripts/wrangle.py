@@ -93,6 +93,10 @@ def command(args, prompt, last):
             argv += ["-m", args.model]
         if args.effort:
             argv += ["-c", f'model_reasoning_effort="{args.effort}"']
+        if args.service_tier:
+            argv += ["-c", f'service_tier="{args.service_tier}"']
+        for override in args.config:
+            argv += ["-c", override]
         return argv + [prompt]
     argv = [args.harness, "-p", prompt, "--output-format", "json"]
     if args.model:
@@ -171,6 +175,9 @@ def parser():
     ap.add_argument("harness", choices=("claude", "agy", "codex"))
     ap.add_argument("--model", help="native model name; omit to use the harness default")
     ap.add_argument("--effort", help="native effort value; no aliasing or clamping")
+    ap.add_argument("--service-tier", help="codex only: service_tier such as fast or ultrafast; not an effort")
+    ap.add_argument("--config", action="append", default=[], metavar="KEY=VALUE",
+                    help="codex only: a raw -c override, repeatable, for settings the runner does not name")
     prompt = ap.add_mutually_exclusive_group()
     prompt.add_argument("--prompt")
     prompt.add_argument("--prompt-file", type=Path)
@@ -183,7 +190,19 @@ def parser():
     ap.add_argument("--dry-run", action="store_true", help="print argv without auth checks or execution")
     ap.add_argument("--inline", action="store_true", help="print even large answers in the JSON result")
     ap.add_argument("--output-dir", type=Path, help="scratch directory for large answer files")
+    ap.add_argument("--result-file", type=Path,
+                    help="also write the result JSON here, for a run started in the background")
     return ap
+
+
+def record(args, payload):
+    """Print the result envelope and, when asked, keep a copy on disk."""
+    rendered = json.dumps(payload)
+    print(rendered)
+    if args.result_file:
+        target = args.result_file.expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered + "\n", encoding="utf-8")
 
 
 def main(argv=None):
@@ -191,6 +210,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.timeout <= 0:
         ap.error("--timeout must be positive")
+    if args.harness != "codex" and (args.service_tier or args.config):
+        ap.error("--service-tier and --config are Codex settings; the other harnesses have no equivalent flag")
     started = time.monotonic()
     try:
         if args.prompt_file:
@@ -212,14 +233,14 @@ def main(argv=None):
             check_subscription(args.harness, args.cwd)
             code, out, err = launch(argv, args.cwd, args.timeout)
             result = parse_result(args.harness, code, out, err, last)
-            result.update(harness=args.harness, model=args.model, exit_code=code,
-                          duration_s=round(time.monotonic() - started, 2))
+            result.update(harness=args.harness, model=args.model, service_tier=args.service_tier,
+                          exit_code=code, duration_s=round(time.monotonic() - started, 2))
             store_large_answer(result, inline=args.inline, output_dir=args.output_dir)
-            print(json.dumps(result))
+            record(args, result)
             return 0 if result["ok"] else 1
     except (Failure, OSError, UnicodeError) as exc:
         code = exc.code if isinstance(exc, Failure) else 2
-        print(json.dumps({"ok": False, "harness": args.harness, "error": str(exc), "exit_code": code}))
+        record(args, {"ok": False, "harness": args.harness, "error": str(exc), "exit_code": code})
         return code
     except KeyboardInterrupt:
         return 130
