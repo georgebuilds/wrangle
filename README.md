@@ -91,6 +91,13 @@ and returned as `file`, `bytes`, and `lines`. Use `--output-dir` to choose the
 scratch directory, or `--inline` to include the full answer in JSON. A CLI's
 `reported_cost_usd` is a usage valuation, not proof of an extra subscription charge.
 
+`skills/wrangle/scripts/threads.py` finds and reads past threads of every harness
+on the machine, read-only: `stores`, `list`, `search`, `show` and `resume`. Codex,
+Claude Code and OpenCode transcripts are read in full; agy keeps conversation
+bodies as undocumented blobs, so only its titles and typed prompts are read and the
+thread is continued natively instead (`wrangle.py agy --resume ID`). Encrypted
+content is never decoded.
+
 For comparisons, the skill runs independent calls and reconciles their findings.
 For sequential work, it passes the relevant result to the next model. Large
 answers can be passed directly with `--file` or `--prompt-file`, without copying

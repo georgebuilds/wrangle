@@ -46,6 +46,19 @@ class RunnerTests(unittest.TestCase):
         self.assertIn('forced_login_method="chatgpt"', argv)
         self.assertIn('model_provider="openai"', argv)
 
+    def test_resume_uses_each_harness_native_flag_without_mutating_the_thread(self):
+        codex = w.command(w.parser().parse_args(['codex', '--resume', 'thread-1']), 'summarize', self.last)
+        self.assertEqual(codex[:3], ['codex', 'exec', 'fork'])
+        self.assertEqual(codex[-2:], ['thread-1', 'summarize'])
+        self.assertIn('--ephemeral', codex)
+        self.assertNotIn('-s', codex)
+        self.assertIn('sandbox_mode="read-only"', codex)
+        claude = w.command(w.parser().parse_args(['claude', '--resume', 'sess-1']), 'summarize', self.last)
+        self.assertEqual(claude[claude.index('--resume') + 1], 'sess-1')
+        self.assertIn('--fork-session', claude)
+        agy = w.command(w.parser().parse_args(['agy', '--resume', 'conv-1']), 'summarize', self.last)
+        self.assertEqual(agy[agy.index('--conversation') + 1], 'conv-1')
+
     def test_codex_service_tier_and_raw_config_pass_through(self):
         args = w.parser().parse_args(['codex', '--service-tier', 'ultrafast', '--config', 'model_reasoning_summary="detailed"'])
         argv = w.command(args, 'test', self.last)

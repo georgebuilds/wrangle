@@ -86,9 +86,17 @@ def check_subscription(harness, cwd):
 
 def command(args, prompt, last):
     if args.harness == "codex":
-        argv = ["codex", "exec", "--json", "--ephemeral", "--skip-git-repo-check",
-                "-c", 'model_provider="openai"', "-c", 'forced_login_method="chatgpt"',
-                "-s", "workspace-write" if args.write else "read-only", "-o", str(last)]
+        argv = ["codex", "exec"]
+        if args.resume:
+            # A fork reads the whole thread into a new one and leaves the original as the
+            # person left it; `exec resume` would append this turn to theirs. The subcommand
+            # takes no `-s`, so the sandbox goes through config.
+            argv += ["fork", "--json", "--ephemeral", "--skip-git-repo-check",
+                     "-c", f'sandbox_mode="{"workspace-write" if args.write else "read-only"}"']
+        else:
+            argv += ["--json", "--ephemeral", "--skip-git-repo-check",
+                     "-s", "workspace-write" if args.write else "read-only"]
+        argv += ["-c", 'model_provider="openai"', "-c", 'forced_login_method="chatgpt"', "-o", str(last)]
         if args.model:
             argv += ["-m", args.model]
         if args.effort:
@@ -97,15 +105,23 @@ def command(args, prompt, last):
             argv += ["-c", f'service_tier="{args.service_tier}"']
         for override in args.config:
             argv += ["-c", override]
+        if args.resume:
+            argv.append(args.resume)
         return argv + [prompt]
     argv = [args.harness, "-p", prompt, "--output-format", "json"]
     if args.model:
         argv += ["--model", args.model]
     if args.harness == "claude":
         argv += ["--permission-mode", "acceptEdits" if args.write else "plan"]
+        if args.resume:
+            # A fork leaves the person's session untouched and still reads all of it.
+            argv += ["--resume", args.resume, "--fork-session"]
     else:
         argv += ["--mode", "accept-edits" if args.write else "plan",
                  "--print-timeout", f"{args.timeout}s"]
+        if args.resume:
+            # agy has no fork: the turn is appended to the conversation it continues.
+            argv += ["--conversation", args.resume]
     if args.effort:
         argv += ["--effort", args.effort]
     return argv
@@ -175,6 +191,8 @@ def parser():
     ap.add_argument("harness", choices=("claude", "agy", "codex"))
     ap.add_argument("--model", help="native model name; omit to use the harness default")
     ap.add_argument("--effort", help="native effort value; no aliasing or clamping")
+    ap.add_argument("--resume", metavar="ID",
+                    help="continue an existing thread of that harness (its id from threads.py) with this prompt")
     ap.add_argument("--service-tier", help="codex only: service_tier such as fast or ultrafast; not an effort")
     ap.add_argument("--config", action="append", default=[], metavar="KEY=VALUE",
                     help="codex only: a raw -c override, repeatable, for settings the runner does not name")
@@ -234,7 +252,7 @@ def main(argv=None):
             code, out, err = launch(argv, args.cwd, args.timeout)
             result = parse_result(args.harness, code, out, err, last)
             result.update(harness=args.harness, model=args.model, service_tier=args.service_tier,
-                          exit_code=code, duration_s=round(time.monotonic() - started, 2))
+                          resumed=args.resume, exit_code=code, duration_s=round(time.monotonic() - started, 2))
             store_large_answer(result, inline=args.inline, output_dir=args.output_dir)
             record(args, result)
             return 0 if result["ok"] else 1
