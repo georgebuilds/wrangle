@@ -78,6 +78,10 @@ python3 "$S" agy --model MODEL_ID_FROM_ROSTER --prompt 'Explain this approach'
 `--file` appends a text file and can be repeated. `--timeout` defaults to 900 seconds.
 `--dry-run` prints the command without executing it. `--effort` passes a native
 value unchanged; use the model roster and CLI notes to choose a supported value.
+`--service-tier fast|ultrafast` (Codex only) sets the speed tier, which is a config
+key rather than an effort and never appears in the roster; `--config KEY=VALUE`
+passes any other Codex setting. `--result-file` keeps a copy of the result JSON on
+disk, for a long write-mode run started in the background.
 
 The default is plan/read-only mode. `--write` permits authorized implementation.
 The runner checks subscription login for Claude and Codex, closes stdin, enforces
@@ -86,6 +90,13 @@ a deadline, and returns JSON with `ok`, `error`, usage, and timing. Answers up t
 and returned as `file`, `bytes`, and `lines`. Use `--output-dir` to choose the
 scratch directory, or `--inline` to include the full answer in JSON. A CLI's
 `reported_cost_usd` is a usage valuation, not proof of an extra subscription charge.
+
+`skills/wrangle/scripts/threads.py` finds and reads past threads of every harness
+on the machine, read-only: `stores`, `list`, `search`, `show` and `resume`. Codex,
+Claude Code and OpenCode transcripts are read in full; agy keeps conversation
+bodies as undocumented blobs, so only its titles and typed prompts are read and the
+thread is continued natively instead (`wrangle.py agy --resume ID`). Encrypted
+content is never decoded.
 
 For comparisons, the skill runs independent calls and reconciles their findings.
 For sequential work, it passes the relevant result to the next model. Large

@@ -69,6 +69,9 @@ and the [CLI reference](https://code.claude.com/docs/en/cli-reference).
 - `-s workspace-write` permits implementation. Read-only is explicit for reviews.
 - Effort is `-c 'model_reasoning_effort="VALUE"'`; preserve supported requested values
   instead of assuming every model has the same ceiling.
+- Speed is `-c 'service_tier="fast"'` or `"ultrafast"`, a config key with no CLI flag of
+  its own and no entry in the model list. `~/.codex/config.toml` may already set it; a
+  `-c` override wins for that run only.
 - JSONL has `item.completed` / `agent_message` for text, `turn.completed` for usage,
   and `error` or `turn.failed` on failure. The answer file may be absent on failure.
 - Close stdin (`</dev/null`) when supplying a prompt argument. A hanging inherited
@@ -77,3 +80,37 @@ and the [CLI reference](https://code.claude.com/docs/en/cli-reference).
   `codex exec` then `codex exec resume SESSION_ID` when continuation is needed.
 
 See the [configuration reference](https://developers.openai.com/codex/config-reference/).
+
+## Where each harness keeps its threads
+
+What `scripts/threads.py` reads, all read-only. Paths are under `$HOME` unless an
+environment variable moves them (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GEMINI_HOME`,
+`XDG_DATA_HOME`); `WRANGLE_THREADS_HOME` replaces `$HOME` for tests.
+
+- **Codex**: `~/.codex/state_N.sqlite` table `threads` is the index (id, `name`, `title`,
+  `first_user_message`, `model`, `cwd`, `git_branch`, `rollout_path`, recency, `archived`,
+  `thread_source`). The transcript is the rollout JSONL under `~/.codex/sessions/`:
+  `event_msg` / `item_completed` items of type `UserMessage` and `AgentMessage`, tool calls
+  as `response_item` `custom_tool_call`. `response_item` `reasoning` carries
+  `encrypted_content` only. `session_index.jsonl` and `history.jsonl` are older views of
+  the same facts. `codex resume ID` continues it interactively. Headless, `codex exec fork ID PROMPT`
+  starts a new thread from its whole history and leaves it untouched; `codex exec resume ID PROMPT`
+  appends the turn to the person's thread, `--ephemeral` or not. A resume or fork that
+  fails with `already has an active writer` means the thread is open in another Codex
+  window; read its rollout with `threads.py show` instead, which needs no lock.
+- **Claude Code**: `~/.claude/projects/<cwd slug>/<session>.jsonl`, one record a line:
+  `user` and `assistant` with `message.content`, `cwd`, `gitBranch`, `timestamp`,
+  `message.model`; `ai-title` / `custom-title` for the name; `isSidechain` marks subagent
+  turns. `~/.claude/history.jsonl` lists typed prompts by `sessionId`. `claude --resume ID`,
+  `claude -p --resume ID --fork-session PROMPT`; the fork writes a new session file and leaves
+  the original byte for byte.
+- **agy / Antigravity**: `~/.gemini/antigravity-cli/` (and `antigravity/` for the IDE):
+  `conversation_summaries.db` holds title, preview, `workspace_uris`, times and
+  `parent_conversation_id`; `history.jsonl` holds typed prompts with `conversationId`;
+  `conversations/<id>.db` holds the body as protobuf blobs in `steps.step_payload`, which
+  is not decoded. `~/.gemini/tmp/<project>/chats/session-*.json` are saved chats in plain
+  JSON. `agy --conversation ID`, `agy --conversation ID -p PROMPT`; there is no fork, so a headless
+  turn is appended to that conversation.
+- **OpenCode**: `~/.local/share/opencode/opencode.db`: `session` (directory, title, model,
+  `parent_id`, `time_archived`), `message.data` (role, model) and `part.data` (`text`,
+  `reasoning`, `tool`). `opencode --session ID`; never run it headlessly from here.

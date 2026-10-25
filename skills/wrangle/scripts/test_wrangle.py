@@ -46,6 +46,29 @@ class RunnerTests(unittest.TestCase):
         self.assertIn('forced_login_method="chatgpt"', argv)
         self.assertIn('model_provider="openai"', argv)
 
+    def test_resume_uses_each_harness_native_flag_without_mutating_the_thread(self):
+        codex = w.command(w.parser().parse_args(['codex', '--resume', 'thread-1']), 'summarize', self.last)
+        self.assertEqual(codex[:3], ['codex', 'exec', 'fork'])
+        self.assertEqual(codex[-2:], ['thread-1', 'summarize'])
+        self.assertIn('--ephemeral', codex)
+        self.assertNotIn('-s', codex)
+        self.assertIn('sandbox_mode="read-only"', codex)
+        claude = w.command(w.parser().parse_args(['claude', '--resume', 'sess-1']), 'summarize', self.last)
+        self.assertEqual(claude[claude.index('--resume') + 1], 'sess-1')
+        self.assertIn('--fork-session', claude)
+        agy = w.command(w.parser().parse_args(['agy', '--resume', 'conv-1']), 'summarize', self.last)
+        self.assertEqual(agy[agy.index('--conversation') + 1], 'conv-1')
+
+    def test_codex_service_tier_and_raw_config_pass_through(self):
+        args = w.parser().parse_args(['codex', '--service-tier', 'ultrafast', '--config', 'model_reasoning_summary="detailed"'])
+        argv = w.command(args, 'test', self.last)
+        self.assertEqual(argv[argv.index('service_tier="ultrafast"') - 1], '-c')
+        self.assertEqual(argv[argv.index('model_reasoning_summary="detailed"') - 1], '-c')
+        self.assertNotIn('model_reasoning_effort="ultrafast"', argv)
+        for harness in ('claude', 'agy'):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                w.main([harness, '--prompt', 'x', '--service-tier', 'fast', '--dry-run'])
+
     def test_claude_result_and_nonzero_failure(self):
         out = 'diagnostic\n' + json.dumps(dict(type='result', subtype='success', result='answer',
                   total_cost_usd=0.02, usage={'input_tokens': 10}))
@@ -124,11 +147,14 @@ class RunnerTests(unittest.TestCase):
         binary = self.root / 'agy'
         binary.write_text('#!' + sys.executable + '\nimport json\nprint(json.dumps(dict(status="SUCCESS", response="answer")))\n')
         binary.chmod(0o755)
+        result_file = self.root / 'nested' / 'result.json'
         with patch.dict(os.environ, {'PATH': str(self.root)}):
-            proc = subprocess.run([sys.executable, str(Path(w.__file__)), 'agy', '--prompt', 'question'],
+            proc = subprocess.run([sys.executable, str(Path(w.__file__)), 'agy', '--prompt', 'question',
+                                   '--result-file', str(result_file)],
                                   capture_output=True, text=True, timeout=5)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(json.loads(proc.stdout)['text'], 'answer')
+        self.assertEqual(json.loads(result_file.read_text(encoding='utf-8')), json.loads(proc.stdout))
 
     def test_large_answer_is_file_backed_with_inline_override(self):
         answer = 'First line\n' + 'x' * 5000
