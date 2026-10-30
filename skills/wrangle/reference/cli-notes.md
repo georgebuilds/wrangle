@@ -90,7 +90,12 @@ environment variable moves them (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GEMINI_HOME
 
 - **Codex**: `~/.codex/state_N.sqlite` table `threads` is the index (id, `name`, `title`,
   `first_user_message`, `model`, `cwd`, `git_branch`, `rollout_path`, recency, `archived`,
-  `thread_source`). The transcript is the rollout JSONL under `~/.codex/sessions/`:
+  `thread_source`). The transcript is the rollout JSONL under `~/.codex/sessions/`
+  (or `archived_sessions/`), either `.jsonl` or Zstandard-compressed `.jsonl.zst`.
+  The index may still name the plain path after compression; the reader resolves
+  its compressed sibling and streams it without changing the store. Reading `.zst`
+  requires Python's `compression.zstd` (3.14+) or the `zstd` command on `PATH`;
+  missing support and decompression failures are reported as errors. Records include
   `event_msg` / `item_completed` items of type `UserMessage` and `AgentMessage`, tool calls
   as `response_item` `custom_tool_call`. `response_item` `reasoning` carries
   `encrypted_content` only. `session_index.jsonl` and `history.jsonl` are older views of

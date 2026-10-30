@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -108,6 +110,138 @@ class FixtureStores(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             code = t.main(list(argv))
         return code, output.getvalue()
+
+    def compress_codex(self, *, indexed=False, extra=b''):
+        rollout = next((self.home / '.codex' / 'sessions').rglob('*.jsonl'))
+        data = rollout.read_bytes() + extra
+        if t.zstd is not None:
+            compressed = t.zstd.compress(data)
+        elif t.shutil.which('zstd'):
+            compressed = subprocess.run(['zstd', '-q', '-c'], input=data, capture_output=True, check=True).stdout
+        else:
+            self.skipTest('compression.zstd or the zstd command is required')
+        target = Path(str(rollout) + '.zst')
+        target.write_bytes(compressed)
+        rollout.unlink()
+        if indexed:
+            with contextlib.closing(sqlite3.connect(self.home / '.codex' / 'state_5.sqlite')) as db:
+                db.execute('UPDATE threads SET rollout_path = ?', (str(target),))
+                db.commit()
+        return target
+
+    def test_compressed_indexed_rollouts_support_list_show_and_search(self):
+        later = {'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': {
+            'type': 'UserMessage', 'content': [{'text': 'followup café résumé'}]}}}
+        target = self.compress_codex(extra=(json.dumps(later, ensure_ascii=False) + '\n\ninvalid json\n').encode())
+        for indexed in (False, True):
+            with self.subTest(indexed=indexed):
+                if indexed:
+                    with contextlib.closing(sqlite3.connect(self.home / '.codex' / 'state_5.sqlite')) as db:
+                        db.execute('UPDATE threads SET rollout_path = ?', (str(target),))
+                        db.commit()
+                code, out = self.run_cli('list', '--harness', 'codex', '--cwd', str(self.repo))
+                self.assertEqual(code, 0)
+                self.assertEqual([(r['id'], r['path']) for r in json.loads(out)], [('codex-1', str(target))])
+                code, out = self.run_cli('show', 'codex', 'codex-1', '--inline', '--roles', 'user,assistant,tool')
+                self.assertEqual(code, 0)
+                self.assertIn('split the controller into three actions', out)
+                self.assertIn('followup café résumé', out)
+                self.assertIn('exec: ls', out)
+                self.assertNotIn('gAAAA', out)
+                for word, flag in (('café', '--prompts'), ('actions', '--deep')):
+                    code, out = self.run_cli('search', word, '--harness', 'codex', '--cwd', str(self.repo), flag)
+                    self.assertEqual(code, 0)
+                    self.assertEqual([r['id'] for r in json.loads(out)], ['codex-1'])
+        self.assertTrue(target.exists())
+        self.assertFalse(target.with_suffix('').exists())
+
+    def test_compressed_rollouts_are_discovered_without_a_usable_index(self):
+        target = self.compress_codex()
+        for invalid_db in (False, True):
+            with self.subTest(invalid_db=invalid_db):
+                db = self.home / '.codex' / 'state_5.sqlite'
+                db.unlink(missing_ok=True)
+                if invalid_db:
+                    db.write_bytes(b'not sqlite')
+                code, out = self.run_cli('list', '--harness', 'codex', '--cwd', str(self.repo))
+                self.assertEqual(code, 0)
+                self.assertEqual([(r['id'], r['path']) for r in json.loads(out)], [('codex-1', str(target))])
+                code, out = self.run_cli('show', 'codex', 'codex-1', '--inline')
+                self.assertEqual(code, 0)
+                self.assertIn('three actions', out)
+                code, out = self.run_cli('search', 'actions', '--harness', 'codex', '--cwd', str(self.repo), '--deep')
+                self.assertEqual(code, 0)
+                self.assertEqual([r['id'] for r in json.loads(out)], ['codex-1'])
+
+    def test_fallback_prefers_plain_rollout_and_does_not_duplicate_it(self):
+        rollout = next((self.home / '.codex' / 'sessions').rglob('*.jsonl'))
+        Path(str(rollout) + '.zst').write_bytes(b'not zstd')
+        (self.home / '.codex' / 'state_5.sqlite').unlink()
+        with patch.object(t, 'zstd', None), patch.object(t.shutil, 'which', return_value=None):
+            code, out = self.run_cli('list', '--harness', 'codex', '--cwd', str(self.repo))
+        self.assertEqual(code, 0)
+        self.assertEqual([r['path'] for r in json.loads(out)], [str(rollout)])
+
+    def test_compressed_archives_keep_the_archive_filter_without_an_index(self):
+        target = self.compress_codex()
+        (self.home / '.codex' / 'state_5.sqlite').unlink()
+        archive = self.home / '.codex' / 'archived_sessions' / target.name
+        archive.parent.mkdir()
+        target.rename(archive)
+        _, out = self.run_cli('list', '--harness', 'codex', '--cwd', str(self.repo))
+        self.assertEqual(json.loads(out), [])
+        _, out = self.run_cli('list', '--harness', 'codex', '--cwd', str(self.repo), '--include-archived')
+        self.assertEqual([r['id'] for r in json.loads(out)], ['codex-1'])
+        self.assertTrue(json.loads(out)[0]['archived'])
+
+    def test_missing_zstd_support_reports_an_actionable_error(self):
+        rollout = next((self.home / '.codex' / 'sessions').rglob('*.jsonl'))
+        rollout.rename(Path(str(rollout) + '.zst'))
+        with patch.object(t, 'zstd', None), patch.object(t.shutil, 'which', return_value=None):
+            for argv in (('show', 'codex', 'codex-1'),
+                         ('search', 'actions', '--harness', 'codex', '--cwd', str(self.repo), '--deep')):
+                code, out = self.run_cli(*argv)
+                self.assertEqual(code, 1)
+                error = json.loads(out)
+                self.assertFalse(error['ok'])
+                self.assertIn('install the zstd command', error['error'])
+
+    def test_corrupt_or_truncated_compression_is_not_a_successful_empty_thread(self):
+        target = self.compress_codex()
+        compressed = target.read_bytes()
+        for data in (b'not zstd', compressed[:-1]):
+            with self.subTest(data=data[:10]):
+                target.write_bytes(data)
+                code, out = self.run_cli('show', 'codex', 'codex-1', '--inline')
+                self.assertEqual(code, 1)
+                error = json.loads(out)
+                self.assertFalse(error['ok'])
+                self.assertIn('Cannot decompress', error['error'])
+
+    def test_stdlib_zstd_reads_text_without_a_subprocess(self):
+        path = self.home / 'rollout.jsonl.zst'
+        module = SimpleNamespace(open=lambda *a, **kw: io.StringIO('{"text": "café"}\n'), ZstdError=ValueError)
+        with patch.object(t, 'zstd', module), patch.object(t.subprocess, 'Popen') as launch:
+            self.assertEqual(list(t.jsonl(path)), [{'text': 'café'}])
+        launch.assert_not_called()
+
+    @unittest.skipUnless(t.shutil.which('zstd'), 'the zstd command is required')
+    def test_cli_decompressor_is_reaped_when_a_reader_stops_early(self):
+        target = self.compress_codex(extra=b'{"padding": "' + b'x' * 1_000_000 + b'"}\n')
+        processes = []
+        popen = subprocess.Popen
+
+        def launch(*args, **kwargs):
+            proc = popen(*args, **kwargs)
+            processes.append(proc)
+            return proc
+
+        with patch.object(t, 'zstd', None), patch.object(t.subprocess, 'Popen', side_effect=launch):
+            with contextlib.closing(t.jsonl(target)) as records:
+                self.assertEqual(next(records)['type'], 'session_meta')
+        self.assertEqual(len(processes), 1)
+        self.assertIsNotNone(processes[0].poll())
+        self.assertTrue(processes[0].stdout.closed)
 
     def test_stores_report_presence_and_readability(self):
         code, out = self.run_cli('stores')

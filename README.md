@@ -31,6 +31,11 @@ You need Python 3.9+ in a POSIX environment and at least one of `claude`, `agy`,
 `codex` installed and signed in to the corresponding plan. The scripts are tested
 on macOS and use only the Python standard library.
 
+Reading compressed Codex history (`rollout-*.jsonl.zst`) requires Python's built-in
+`compression.zstd` module (Python 3.14+) or the `zstd` command on `PATH`. The reader
+streams these files without modifying them, including when the index still names
+the old `.jsonl` path.
+
 ## Routing
 
 | Request | Default execution target |

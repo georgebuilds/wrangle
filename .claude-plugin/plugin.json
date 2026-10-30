@@ -1,7 +1,7 @@
 {
   "name": "wrangle",
   "description": "Use Claude Code, agy, and Codex through existing subscriptions, with cross-model workflows and native model roster refresh",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "georgebuilds",
     "url": "https://github.com/georgebuilds"

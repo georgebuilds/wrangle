@@ -8,15 +8,23 @@ thread; `resume` only prints the native command for one.
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 import glob
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
+import tempfile
+
+try:
+    from compression import zstd
+except ImportError:
+    zstd = None
 
 
 HARNESSES = ("codex", "claude", "agy", "opencode")
@@ -59,9 +67,47 @@ def parse_since(value: str | None) -> float | None:
     return parsed.timestamp() * 1000
 
 
+class ThreadReadError(Exception):
+    pass
+
+
+@contextmanager
+def jsonl_text(path: Path):
+    if path.suffix != ".zst":
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            yield handle
+        return
+    if zstd is not None:
+        try:
+            with zstd.open(path, "rt", encoding="utf-8", errors="replace") as handle:
+                yield handle
+        except (zstd.ZstdError, EOFError, OSError) as exc:
+            raise ThreadReadError(f"Cannot decompress {path}: {exc}") from exc
+        return
+    binary = shutil.which("zstd")
+    if binary is None:
+        raise ThreadReadError(f"Cannot read {path}: install the zstd command or use Python with compression.zstd (3.14+)")
+    try:
+        with tempfile.TemporaryFile() as errors, subprocess.Popen(
+            [binary, "-dc", "--", str(path)], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=errors, text=True, encoding="utf-8", errors="replace",
+        ) as proc:
+            try:
+                yield proc.stdout
+                if proc.wait() != 0:
+                    errors.seek(0)
+                    detail = errors.read(4096).decode("utf-8", errors="replace").strip()
+                    raise ThreadReadError(f"Cannot decompress {path}: {detail or 'zstd failed'}")
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+    except OSError as exc:
+        raise ThreadReadError(f"Cannot decompress {path}: {exc}") from exc
+
+
 def jsonl(path: Path):
     try:
-        with path.open(encoding="utf-8", errors="replace") as handle:
+        with jsonl_text(path) as handle:
             for line in handle:
                 line = line.strip()
                 if not line:
@@ -134,6 +180,13 @@ def codex_state_db() -> Path | None:
     return candidates[-1] if candidates else None
 
 
+def codex_rollout_path(path: Path) -> Path:
+    if path.exists():
+        return path
+    alternate = path.with_suffix("") if path.suffix == ".zst" else Path(str(path) + ".zst")
+    return alternate if alternate.exists() else path
+
+
 def codex_threads(include_subagents: bool):
     db = codex_state_db()
     if db is not None:
@@ -155,23 +208,29 @@ def codex_threads(include_subagents: bool):
                     first_prompt=row["first_user_message"] or None, cwd=row["cwd"], branch=row["git_branch"],
                     model=row["model"], started=iso(row["created_at_ms"]),
                     updated=iso(row["recency_at_ms"] or row["updated_at_ms"]),
-                    subagent=subagent, archived=bool(row["archived"]), path=row["rollout_path"],
+                    subagent=subagent, archived=bool(row["archived"]), path=str(codex_rollout_path(Path(row["rollout_path"]))),
                     sort_ms=row["recency_at_ms"] or row["updated_at_ms"] or 0,
                 )
             return
-    for path in codex_root().glob("sessions/**/*.jsonl"):
-        meta = next((r for r in jsonl(path) if r.get("type") == "session_meta"), None)
-        if not meta:
-            continue
-        payload = meta.get("payload", {})
-        ms = path.stat().st_mtime * 1000
-        yield thread("codex", payload.get("id") or path.stem, cwd=payload.get("cwd"),
-                     started=payload.get("timestamp"), updated=iso(ms), path=str(path), sort_ms=ms)
+    for directory, archived in (("sessions", False), ("archived_sessions", True)):
+        for path in (codex_root() / directory).glob("**/*.jsonl*"):
+            if not (path.name.endswith(".jsonl") or path.name.endswith(".jsonl.zst")):
+                continue
+            if path.suffix == ".zst" and path.with_suffix("").exists():
+                continue
+            with closing(jsonl(path)) as records:
+                meta = next((r for r in records if r.get("type") == "session_meta"), None)
+            if not meta:
+                continue
+            payload = meta.get("payload", {})
+            ms = path.stat().st_mtime * 1000
+            yield thread("codex", payload.get("id") or Path(path.name.removesuffix(".zst")).stem, cwd=payload.get("cwd"),
+                         started=payload.get("timestamp"), updated=iso(ms), path=str(path), sort_ms=ms, archived=archived)
 
 
 def codex_messages(path: Path):
     """User and assistant turns from a rollout. Reasoning is encrypted and skipped."""
-    for record in jsonl(path):
+    for record in jsonl(codex_rollout_path(path)):
         kind, payload = record.get("type"), record.get("payload") or {}
         if kind == "event_msg" and payload.get("type") == "item_completed":
             item = payload.get("item") or {}
@@ -605,6 +664,14 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
+    try:
+        return dispatch(args)
+    except ThreadReadError as exc:
+        print(json.dumps(dict(ok=False, error=str(exc))))
+        return 1
+
+
+def dispatch(args) -> int:
     if args.command == "stores":
         print(json.dumps(stores(), ensure_ascii=False))
         return 0
