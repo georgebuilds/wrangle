@@ -82,6 +82,23 @@ and the [CLI reference](https://code.claude.com/docs/en/cli-reference).
 
 See the [configuration reference](https://developers.openai.com/codex/config-reference/).
 
+## Headless skill invocation
+
+Explicitly reading an absolute `SKILL.md` path works with both `claude -p` and
+`codex exec`; neither process inherits the calling agent's loaded skill context.
+Include the task's scope, options, output paths and lifecycle owner. This also
+works for an explicit-only skill delegated at the user's request. Use the same
+subscription checks and permission modes as an ordinary run. Writing an ignored
+audit report requires write permission; it does not authorize source edits.
+
+Claude's roster can map a moving alias such as `haiku` to `resolved_id`. When a
+workflow records exact model provenance, resolve it immediately before the run
+and pass that ID to the CLI. The requested alias alone is not the model's version.
+Codex ephemeral runs may not appear in the thread index; retain the runner result
+and output artifacts instead of depending on later session lookup. Use
+`--transcript-file` for a live native log: it streams whatever the CLI emits,
+without requiring a persistent session or decoding its private store.
+
 ## Where each harness keeps its threads
 
 What `scripts/threads.py` reads, all read-only. Paths are under `$HOME` unless an

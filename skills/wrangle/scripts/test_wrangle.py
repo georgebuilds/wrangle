@@ -201,6 +201,66 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('text', result)
         self.assertEqual(Path(result['file']).read_text(encoding='utf-8'), answer)
 
+    def test_transcript_is_readable_before_completion(self):
+        transcript = self.root / 'native.jsonl'
+        release = self.root / 'release'
+        binary = self.root / 'agy'
+        binary.write_text('#!' + sys.executable + '\nimport json,time\nfrom pathlib import Path\n'
+                          'print(json.dumps(dict(status="PROGRESS", response="working")), flush=True)\n'
+                          f'deadline=time.monotonic()+5\nwhile not Path({str(release)!r}).exists() and time.monotonic()<deadline: time.sleep(.01)\n'
+                          'print(json.dumps(dict(status="SUCCESS", response="finished")), flush=True)\n')
+        binary.chmod(0o755)
+        env = dict(os.environ, PATH=str(self.root) + os.pathsep + os.environ['PATH'])
+        proc = subprocess.Popen([sys.executable, str(Path(w.__file__)), 'agy', '--prompt', 'question',
+                                 '--transcript-file', str(transcript)], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and (not transcript.exists() or 'working' not in transcript.read_text()):
+                time.sleep(.01)
+            self.assertIn('working', transcript.read_text())
+            self.assertIsNone(proc.poll())
+            release.touch()
+            out, err = proc.communicate(timeout=5)
+            self.assertEqual(proc.returncode, 0, err)
+            result = json.loads(out)
+            self.assertEqual(result['text'], 'finished')
+            self.assertEqual(result['transcript_file'], str(transcript.resolve()))
+            self.assertEqual(transcript.stat().st_mode & 0o777, 0o600)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+
+    def test_transcript_preserves_partial_output_on_timeout(self):
+        transcript = self.root / 'timeout.log'
+        with self.assertRaises(w.Failure):
+            w.launch([sys.executable, '-c', 'import time; print("started",flush=True); time.sleep(5)'],
+                     self.root, .2, transcript_file=transcript)
+        self.assertEqual(transcript.read_text(), 'started\n')
+
+    def test_transcript_refuses_existing_files_and_symlinks(self):
+        existing = self.root / 'existing'
+        existing.write_text('keep')
+        link = self.root / 'link'
+        link.symlink_to(existing)
+        for path in (existing, link):
+            with self.assertRaises(FileExistsError):
+                w.launch([sys.executable, '-c', 'print("changed")'], self.root, 1, transcript_file=path)
+        self.assertEqual(existing.read_text(), 'keep')
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(w.main(['agy', '--prompt', 'question', '--transcript-file', str(existing)]), 2)
+        self.assertNotIn('transcript_file', json.loads(output.getvalue()))
+
+    def test_transcript_dry_run_writes_nothing_and_result_path_is_distinct(self):
+        transcript = self.root / 'dry.log'
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(w.main(['agy', '--prompt', 'question', '--transcript-file', str(transcript), '--dry-run']), 0)
+        self.assertFalse(transcript.exists())
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            w.main(['agy', '--prompt', 'question', '--transcript-file', str(transcript), '--result-file', str(transcript)])
+
 
 if __name__ == '__main__':
     unittest.main()

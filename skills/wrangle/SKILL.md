@@ -91,6 +91,12 @@ plan takes an hour or more. Start it in the background with `--timeout` set to t
 whole budget and `--result-file <scratchpad>/result.json`, then read that file when
 the process exits instead of parsing captured stdout.
 
+Add `--transcript-file <scratchpad>/native.log` to inspect native stdout/stderr
+while the process runs. It creates a new private file and refuses to overwrite
+an existing file. The transcript retains partial output after a timeout; the
+result file still carries the final status. Codex emits tool progress as JSONL;
+other harnesses may buffer their chosen JSON output until completion.
+
 Results are JSON. Answers up to 4 KiB stay in `text`; larger answers are written to
 a private temporary `.txt` file, and the JSON contains `file`, `bytes`, and `lines`
 instead of reprinting the answer. Read only the relevant parts, or pass the file
@@ -108,6 +114,27 @@ These modes are CLI permission controls, not a guarantee against every configure
 hook or external tool side effect. Do not bypass a refusal by broadening permissions.
 Direct native invocation is fine for features the small runner does not expose,
 such as resuming a session; preserve the same auth, scope, and deadline constraints.
+
+### Invoke another skill headlessly
+
+A child process does not inherit the host's loaded skills. Give it the absolute
+`SKILL.md` path and explicitly ask it to apply that skill to the supplied task.
+`--file /absolute/skill/SKILL.md` can include the entrypoint text; keep the path in
+the prompt so relative references and scripts resolve against that skill directory.
+Do not assume a bare `$skill-name` or slash command will be discovered in every
+harness. An explicit-only skill needs the user's invocation or delegated request.
+
+Include the options the user already supplied so the child does not stop to ask
+for them again. A useful prompt shape is: "The user invokes the skill at PATH.
+Read it and its required references, then complete TASK with OPTIONS. Write only
+ARTIFACTS; source is read-only."
+
+Choose permissions for the artifacts too. An audit that must save a report needs
+`--write`, even though its source review remains read-only. State the allowed
+output paths and retain the audit's source guard. If the host manages a skill's
+begin/finish bookkeeping, say so and give the child its already-started run and
+report path; do not let both processes start the same lifecycle. Inspect the
+result and artifact before counting a successful CLI exit as completed work.
 
 ## Pass context between models
 

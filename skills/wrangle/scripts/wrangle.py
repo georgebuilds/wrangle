@@ -22,32 +22,46 @@ class Failure(Exception):
         self.code = code
 
 
-def launch(argv, cwd, timeout, input_data=None):
+def launch(argv, cwd, timeout, input_data=None, transcript_file=None):
     """Close stdin after optional control input; terminate on timeout or interruption."""
+    output = None
     try:
-        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, encoding="utf-8", errors="replace",
-                                start_new_session=True)
-    except FileNotFoundError as exc:
-        raise Failure(f"Cannot start {argv[0]}: {exc}", 4) from exc
-    try:
-        out, err = proc.communicate(input=input_data, timeout=timeout)
-    except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        if transcript_file is not None:
+            transcript_file = transcript_file.expanduser().absolute()
+            transcript_file.parent.mkdir(parents=True, exist_ok=True)
+            output = os.fdopen(os.open(transcript_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+                               "w", encoding="utf-8")
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
-            time.sleep(0.2)
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            if proc.poll() is None:
-                raise Failure("Could not terminate the child process group", 5) from exc
-        proc.communicate()
-        if isinstance(exc, KeyboardInterrupt):
-            raise
-        raise Failure(f"Timed out after {timeout}s", 5) from exc
-    return proc.returncode, out, err
+            proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
+                                    stdout=output if output is not None else subprocess.PIPE,
+                                    stderr=subprocess.STDOUT if output is not None else subprocess.PIPE,
+                                    text=True, encoding="utf-8", errors="replace",
+                                    start_new_session=True)
+        except FileNotFoundError as exc:
+            raise Failure(f"Cannot start {argv[0]}: {exc}", 4) from exc
+        try:
+            out, err = proc.communicate(input=input_data, timeout=timeout)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                time.sleep(0.2)
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                if proc.poll() is None:
+                    raise Failure("Could not terminate the child process group", 5) from exc
+            proc.communicate()
+            if isinstance(exc, KeyboardInterrupt):
+                raise
+            raise Failure(f"Timed out after {timeout}s", 5) from exc
+        if output is not None:
+            output.flush()
+            out, err = transcript_file.read_text(encoding="utf-8", errors="replace"), ""
+        return proc.returncode, out, err
+    finally:
+        if output is not None:
+            output.close()
 
 
 def objects(raw):
@@ -210,6 +224,8 @@ def parser():
     ap.add_argument("--output-dir", type=Path, help="scratch directory for large answer files")
     ap.add_argument("--result-file", type=Path,
                     help="also write the result JSON here, for a run started in the background")
+    ap.add_argument("--transcript-file", type=Path,
+                    help="stream native stdout/stderr to a new private file while the run is active")
     return ap
 
 
@@ -230,6 +246,8 @@ def main(argv=None):
         ap.error("--timeout must be positive")
     if args.harness != "codex" and (args.service_tier or args.config):
         ap.error("--service-tier and --config are Codex settings; the other harnesses have no equivalent flag")
+    if args.transcript_file and args.result_file and args.transcript_file.expanduser().resolve() == args.result_file.expanduser().resolve():
+        ap.error("--transcript-file and --result-file must be different paths")
     started = time.monotonic()
     try:
         if args.prompt_file:
@@ -249,16 +267,21 @@ def main(argv=None):
                 print(json.dumps({"harness": args.harness, "cwd": str(args.cwd), "argv": argv}))
                 return 0
             check_subscription(args.harness, args.cwd)
-            code, out, err = launch(argv, args.cwd, args.timeout)
+            code, out, err = launch(argv, args.cwd, args.timeout, transcript_file=args.transcript_file)
             result = parse_result(args.harness, code, out, err, last)
             result.update(harness=args.harness, model=args.model, service_tier=args.service_tier,
                           resumed=args.resume, exit_code=code, duration_s=round(time.monotonic() - started, 2))
+            if args.transcript_file:
+                result['transcript_file'] = str(args.transcript_file.expanduser().resolve())
             store_large_answer(result, inline=args.inline, output_dir=args.output_dir)
             record(args, result)
             return 0 if result["ok"] else 1
     except (Failure, OSError, UnicodeError) as exc:
         code = exc.code if isinstance(exc, Failure) else 2
-        record(args, {"ok": False, "harness": args.harness, "error": str(exc), "exit_code": code})
+        result = {"ok": False, "harness": args.harness, "error": str(exc), "exit_code": code}
+        if args.transcript_file and not isinstance(exc, FileExistsError) and args.transcript_file.expanduser().is_file():
+            result['transcript_file'] = str(args.transcript_file.expanduser().resolve())
+        record(args, result)
         return code
     except KeyboardInterrupt:
         return 130

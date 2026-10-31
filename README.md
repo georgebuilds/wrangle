@@ -86,7 +86,10 @@ value unchanged; use the model roster and CLI notes to choose a supported value.
 `--service-tier fast|ultrafast` (Codex only) sets the speed tier, which is a config
 key rather than an effort and never appears in the roster; `--config KEY=VALUE`
 passes any other Codex setting. `--result-file` keeps a copy of the result JSON on
-disk, for a long write-mode run started in the background.
+disk, for a long write-mode run started in the background. `--transcript-file`
+streams the CLI's native output to a new private file while the run is active, so a
+background run can be inspected before it finishes; it refuses to overwrite an
+existing file and keeps partial output after a timeout.
 
 The default is plan/read-only mode. `--write` permits authorized implementation.
 The runner checks subscription login for Claude and Codex, closes stdin, enforces
