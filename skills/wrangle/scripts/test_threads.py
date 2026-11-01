@@ -272,6 +272,8 @@ class FixtureStores(unittest.TestCase):
         self.assertEqual([r['id'] for r in json.loads(out)], ['codex-1'])
         _, out = self.run_cli('list', '--any-cwd', '--harness', 'opus')
         self.assertEqual({r['harness'] for r in json.loads(out)}, {'claude'})
+        _, out = self.run_cli('list', '--any-cwd', '--harness', 'carbon')
+        self.assertEqual({r['harness'] for r in json.loads(out)}, {'agy'})
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.run_cli('list', '--harness', 'excel')
 

@@ -121,6 +121,39 @@ for line in sys.stdin:
         self.assertTrue(result[1]['error'])
         self.assertEqual(result[2]['models'][0]['id'], 'model')
 
+    def test_resolve_spec_maps_families_and_preserves_exact_ids(self):
+        rosters = {
+            'claude': [dict(id='haiku', name='Haiku 5.5', resolved_id='claude-haiku-5-5')],
+            'codex': [dict(id='gpt-6-luna', name='GPT-6-Luna'), dict(id='gpt-5.6-luna', name='GPT-5.6-Luna'),
+                      dict(id='gpt-6.1-terra', name='GPT-6.1 Terra')],
+            'agy': [dict(id='gemini-4-argon-high', name='Gemini 4 Argon (High)'),
+                    dict(id='gemini-4-argon-medium', name='Gemini 4 Argon (Medium)'),
+                    dict(id='gemini-4-carbon-high', name='Gemini 4 Carbon (High)'),
+                    dict(id='gemini-4-carbon-medium', name='Gemini 4 Carbon (Medium)')],
+        }
+        for harness, models in rosters.items():
+            (self.root / f'{harness}.json').write_text(json.dumps(
+                dict(harness=harness, fetched_at=time.time(), models=models)))
+        self.assertEqual(r.resolve_spec('haiku', self.root),
+                         dict(harness='claude', requested_model='haiku', model='claude-haiku-5-5'))
+        self.assertEqual(r.resolve_spec('luna', self.root),
+                         dict(harness='codex', requested_model='luna', model='gpt-6-luna'))
+        self.assertEqual(r.resolve_spec('luna-5.6', self.root),
+                         dict(harness='codex', requested_model='luna-5.6', model='gpt-5.6-luna'))
+        self.assertEqual(r.resolve_spec('terra', self.root),
+                         dict(harness='codex', requested_model='terra', model='gpt-6.1-terra'))
+        self.assertEqual(r.resolve_spec('argon', self.root),
+                         dict(harness='agy', requested_model='argon', model='gemini-4-argon-medium'))
+        self.assertEqual(r.resolve_spec('argon:high', self.root),
+                         dict(harness='agy', requested_model='argon:high', model='gemini-4-argon-high'))
+        self.assertEqual(r.resolve_spec('carbon', self.root),
+                         dict(harness='agy', requested_model='carbon', model='gemini-4-carbon-medium'))
+        self.assertEqual(r.resolve_spec('agy:carbon:high', self.root),
+                         dict(harness='agy', requested_model='carbon:high', model='gemini-4-carbon-high'))
+        with patch.object(r, 'cached_roster', side_effect=AssertionError('exact ID needs no roster lookup')):
+            self.assertEqual(r.resolve_spec('codex:gpt-test', self.root),
+                             dict(harness='codex', requested_model='gpt-test', model='gpt-test'))
+
 
 if __name__ == '__main__':
     unittest.main()

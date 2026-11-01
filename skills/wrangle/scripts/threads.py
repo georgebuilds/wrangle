@@ -33,9 +33,9 @@ MAX_INLINE_BYTES = 4096
 # A family word to the harness whose roster carries it. Matched against the
 # thread's recorded model as a substring as well.
 FAMILIES = {
-    "codex": ("gpt", "astra", "sol", "luna", "o3", "o4"),
+    "codex": ("gpt", "astra", "sol", "luna", "terra", "o3", "o4"),
     "claude": ("claude", "opus", "sonnet", "haiku", "fable"),
-    "agy": ("gemini", "argon", "flash"),
+    "agy": ("gemini", "argon", "carbon", "flash", "pro"),
 }
 
 

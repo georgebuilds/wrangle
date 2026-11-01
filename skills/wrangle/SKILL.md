@@ -12,16 +12,33 @@ an execution target. Do not look up OpenCode providers, API rates, or gateway ro
 
 ## Choose the target
 
-Honor an explicit harness first. Otherwise use the model's native harness:
+Honor an explicit harness first. Otherwise map each requested model to its native harness:
 
 | Requested model | Harness | Model selection |
 |---|---|---|
 | Claude, Opus, Sonnet, Haiku, Fable | `claude` | Use a native alias such as `sonnet`, or preserve an exact model ID |
-| Gemini, Argon, Flash, Gemini Pro | `agy` | Choose the matching ID from the refreshed roster |
-| GPT, Astra, Sol, or another OpenAI model | `codex` | Use the refreshed roster to resolve a family name; preserve exact IDs |
+| Gemini, Argon, Carbon, Flash, Gemini Pro | `agy` | Choose the matching ID from the refreshed roster |
+| GPT, Astra, Sol, Luna, Terra, or another OpenAI model | `codex` | Use the refreshed roster to resolve a family name; preserve exact IDs |
 
-"Do X with Argon" means use `agy` and resolve Argon against its current roster,
-preserving any requested tier. Fable and Astra likewise select their native harnesses above.
+**Use native subagents for same-harness models.** Compare each target's harness
+against the host harness you are currently running in:
+- **Same harness as host** (e.g. asking for `luna`, `sol`, `astra`, or `terra` inside
+  Codex, or asking for `haiku`, `sonnet`, `opus`, or `fable` inside Claude Code):
+  use the host's native subagent tool with that model selected (`spawn_agent` with
+  `model` in Codex; `Agent` with `model` in Claude Code) instead of shelling out to
+  `wrangle.py`. Native subagents give you direct steering, streaming progress, and
+  no headless CLI startup overhead.
+- **Different harness from host**: use `wrangle.py`.
+- **Mixed multi-model requests** (e.g. "get opinions from haiku and luna" while in
+  Codex or Claude Code): spawn the same-harness model via your native subagent tool
+  and run the cross-harness model via `wrangle.py` concurrently in the same turn.
+- **Exception**: headless batch runners (such as `qp-chain.sh` in `quality-pass-audit`)
+  that manage isolated processes and collect CLI usage/cost JSON run every target
+  through `wrangle.py`.
+
+"Do X with Argon" or "with Carbon" means use `agy` and resolve Argon or Carbon
+against its current roster, preserving any requested tier. Fable and Astra likewise
+select their native harnesses above.
 
 If only a harness is named, omit `--model` and use its configured default. For an
 unspecified second opinion, use another available subscription harness, announce
@@ -42,6 +59,7 @@ without sending a prompt or starting an inference turn:
 ```bash
 python3 /path/to/wrangle/scripts/roster.py                 # all three harnesses
 python3 /path/to/wrangle/scripts/roster.py agy             # only the needed harness
+python3 /path/to/wrangle/scripts/roster.py --resolve luna --resolve argon:high
 python3 /path/to/wrangle/scripts/roster.py --refresh       # force refresh now
 python3 /path/to/wrangle/scripts/roster.py --offline       # cached lists only
 ```

@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import subprocess
 import tempfile
@@ -12,7 +13,76 @@ import time
 from wrangle import Failure, launch, objects
 
 HARNESSES = ('claude', 'agy', 'codex')
+FAMILIES = {
+    'claude': ('claude', 'opus', 'sonnet', 'haiku', 'fable'),
+    'agy': ('gemini', 'argon', 'carbon', 'flash', 'pro'),
+    'codex': ('gpt', 'astra', 'sol', 'luna', 'terra', 'o3', 'o4'),
+}
 TTL = 24 * 60 * 60
+
+
+def infer_harness(spec):
+    """Map '[harness:]model[:tier]' to (harness, model_spec)."""
+    text = (spec or '').strip()
+    if ':' in text and text.split(':', 1)[0] in HARNESSES:
+        harness, rest = text.split(':', 1)
+        if not rest.strip():
+            raise Failure(f'Expected model name after {harness}: in {spec!r}')
+        return harness, rest.strip()
+    lower = text.lower()
+    if lower.startswith('claude-'):
+        return 'claude', text
+    if lower.startswith(('gpt-', 'o3', 'o4')):
+        return 'codex', text
+    if lower.startswith('gemini-'):
+        return 'agy', text
+    tokens = [t for t in re.split(r'[:_\-\s/().]+', lower) if t]
+    for harness, words in FAMILIES.items():
+        if any(w in tokens for w in words):
+            return harness, text
+    raise Failure(f'Cannot infer harness for {spec!r}; prefix with claude:, codex:, or agy:')
+
+
+def needs_resolution(harness, model):
+    """True when model is a family alias or shorthand rather than an exact ID."""
+    lower = model.strip().lower()
+    if harness == 'claude':
+        return not lower.startswith('claude-')
+    tokens = [t for t in re.split(r'[:_\-\s/()]+', lower) if t]
+    if harness == 'codex':
+        return (':' in lower or lower in FAMILIES['codex']
+                or any(lower.startswith(w + '-') or lower.startswith(w + ' ')
+                       for w in ('astra', 'sol', 'luna', 'terra')))
+    if harness == 'agy':
+        if ':' in lower or lower in FAMILIES['agy']:
+            return True
+        if any(w in tokens for w in FAMILIES['agy']):
+            return not re.fullmatch(r'gemini-[0-9.]+-[a-z0-9]+-(?:low|medium|high|max)', lower)
+    return False
+
+
+def match_model(harness, requested, models):
+    """Resolve a requested family alias or shorthand against a harness's model list."""
+    clean = requested.strip()
+    for entry in models:
+        if entry.get('id') == clean:
+            return entry.get('resolved_id') or entry['id']
+    tokens = [t for t in re.split(r'[:_\-\s/()]+', clean.lower()) if t]
+    matches = []
+    for entry in models:
+        haystack = f"{entry.get('id', '')} {entry.get('name', '')}".lower()
+        entry_tokens = set(re.split(r'[:_\-\s/()]+', haystack))
+        if harness == 'agy' and any(t in FAMILIES['agy'] for t in tokens):
+            if 'gemini' not in entry_tokens:
+                continue
+        if tokens and all(t in entry_tokens for t in tokens):
+            matches.append(entry)
+    if matches:
+        if harness == 'agy' and not any(t in ('low', 'medium', 'high', 'max') for t in tokens):
+            preferred = next((m for m in matches if str(m.get('id', '')).endswith('-medium')), matches[0])
+            return preferred.get('resolved_id') or preferred['id']
+        return matches[0].get('resolved_id') or matches[0]['id']
+    raise Failure(f'Cannot resolve {harness}:{clean} to a current exact model; supply its exact ID.')
 
 
 def codex_models(cwd, timeout):
@@ -127,9 +197,23 @@ def cached_roster(harness, root, refresh=False, offline=False, timeout=120):
                 error=error, models=cached.get('models', []))
 
 
+def resolve_spec(spec, root, refresh=False, offline=False, timeout=120):
+    """Resolve '[harness:]model[:tier]' to dict(harness, requested_model, model)."""
+    harness, requested = infer_harness(spec)
+    if not needs_resolution(harness, requested):
+        return dict(harness=harness, requested_model=requested, model=requested)
+    listing = cached_roster(harness, root, refresh=refresh, offline=offline, timeout=timeout)
+    if listing.get('stale') or listing.get('error'):
+        raise Failure(f'Cannot resolve {harness}:{requested} to a current exact model; supply its exact ID.')
+    resolved = match_model(harness, requested, listing.get('models', []))
+    return dict(harness=harness, requested_model=requested, model=resolved)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('harness', nargs='?', choices=HARNESSES)
+    ap.add_argument('--resolve', action='append', default=[], metavar='SPEC',
+                    help='resolve a model family or [harness:]model[:tier] spec to exact harness and model ID')
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument('--refresh', action='store_true', help='fetch even if the cache is fresh')
     mode.add_argument('--offline', action='store_true', help='read cached data only')
@@ -138,6 +222,15 @@ def main(argv=None):
     if args.timeout <= 0:
         ap.error('--timeout must be positive')
     root = Path(os.environ.get('WRANGLE_HOME', Path.home() / '.config' / 'wrangle')) / 'roster'
+    if args.resolve:
+        try:
+            resolved = [resolve_spec(spec, root, args.refresh, args.offline, args.timeout)
+                        for spec in args.resolve]
+        except Failure as exc:
+            print(json.dumps(dict(ok=False, error=str(exc))))
+            return 2
+        print(json.dumps(resolved[0] if len(resolved) == 1 else resolved, indent=2))
+        return 0
     results = [cached_roster(h, root, args.refresh, args.offline, args.timeout)
                for h in ([args.harness] if args.harness else HARNESSES)]
     print(json.dumps(results, indent=2))
