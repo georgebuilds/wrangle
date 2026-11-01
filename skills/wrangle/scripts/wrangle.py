@@ -141,7 +141,16 @@ def command(args, prompt, last):
     return argv
 
 
-def parse_result(harness, code, out, err, last):
+def denial_note(denied):
+    """Name the tools a headless run was refused, for the error a person reads."""
+    names = sorted({str(item.get("display_name") or item.get("action") or "a tool")
+                    for item in denied if isinstance(item, dict)})
+    return (f" It was denied {', '.join(names)}, which headless mode cannot prompt for. "
+            "Attach the material with --file and ask for an answer that needs no tools, or use another harness.")
+
+
+def parse_result(harness, code, out, err, last, require_text=True):
+    """Normalise one run. A read-only run that returns no text did not answer, whatever its status says."""
     records = list(objects(out))
     result = dict(ok=False, text="", usage=None, reported_cost_usd=None,
                   session_id=None, error=None)
@@ -172,8 +181,13 @@ def parse_result(harness, code, out, err, last):
             result["usage"] = doc.get("usage")
             result["reported_cost_usd"] = doc.get("total_cost_usd")
             result["session_id"] = doc.get("session_id" if harness == "claude" else "conversation_id")
+            if doc.get("denied_actions"):
+                result["denied_actions"] = doc["denied_actions"]
             if not success:
                 result["error"] = doc.get("error") or doc.get("errors") or doc.get("subtype") or doc.get("status")
+    if result["ok"] and require_text and not str(result["text"] or "").strip():
+        result["ok"] = False
+        result["error"] = "Empty response: the run completed but returned no text." + denial_note(result.get("denied_actions") or [])
     if not result["ok"] and not result["error"]:
         result["error"] = (err or out or "No successful completion record")[-2000:]
     return result
@@ -268,7 +282,7 @@ def main(argv=None):
                 return 0
             check_subscription(args.harness, args.cwd)
             code, out, err = launch(argv, args.cwd, args.timeout, transcript_file=args.transcript_file)
-            result = parse_result(args.harness, code, out, err, last)
+            result = parse_result(args.harness, code, out, err, last, require_text=not args.write)
             result.update(harness=args.harness, model=args.model, service_tier=args.service_tier,
                           resumed=args.resume, exit_code=code, duration_s=round(time.monotonic() - started, 2))
             if args.transcript_file:

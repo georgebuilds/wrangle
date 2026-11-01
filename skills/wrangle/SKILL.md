@@ -109,6 +109,27 @@ plan takes an hour or more. Start it in the background with `--timeout` set to t
 whole budget and `--result-file <scratchpad>/result.json`, then read that file when
 the process exits instead of parsing captured stdout.
 
+**Start each run so you are told when it ends.**
+
+<claude-code-only>
+In Claude Code, launch every `wrangle.py` as its own Bash call with `run_in_background: true`
+(one call per target, never one call that starts several), and read its `--result-file` when
+the completion notice arrives. A trailing `&` or `nohup` starts a process nothing watches: no
+notice ever comes, and the run can finish long before you look.
+</claude-code-only>
+<other-harnesses>
+Use your harness's tracked background job when it has one. Otherwise start the run detached
+with `--result-file` and poll that file in a bounded loop that stops a minute after the run's
+`--timeout`, rather than assuming it is still going.
+</other-harnesses>
+
+**A result that came back is not a run that worked.** Count an answer only when `ok` is true and
+`text` (or `file`) is non-empty. A read-only run that returns no text is reported as a failure
+with an `error`, and agy lists `denied_actions` when it needed a tool headless mode cannot
+approve: retry with the material attached through `--file` and a brief that asks for no tool use,
+or use another harness. Never count it as a clean review. An implementation run (`--write`) may
+legitimately end without text, so it is not held to this.
+
 Add `--transcript-file <scratchpad>/native.log` to inspect native stdout/stderr
 while the process runs. It creates a new private file and refuses to overwrite
 an existing file. The transcript retains partial output after a timeout; the

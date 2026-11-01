@@ -86,6 +86,32 @@ class RunnerTests(unittest.TestCase):
             if not ok:
                 self.assertEqual(result['error'], 'quota')
 
+    def test_a_read_only_run_with_no_text_is_a_failure_that_names_what_it_was_denied(self):
+        denied = [dict(action='command', display_name='RunCommand')]
+        agy = json.dumps(dict(status='SUCCESS', response='', denied_actions=denied))
+        result = w.parse_result('agy', 0, agy, '', self.last)
+        self.assertFalse(result['ok'])
+        self.assertIn('Empty response', result['error'])
+        self.assertIn('RunCommand', result['error'])
+        self.assertEqual(result['denied_actions'], denied)
+        claude = json.dumps(dict(type='result', subtype='success', result='   '))
+        self.assertFalse(w.parse_result('claude', 0, claude, '', self.last)['ok'])
+        codex = '\n'.join(map(json.dumps, [dict(type='turn.completed', usage={})]))
+        self.assertFalse(w.parse_result('codex', 0, codex, '', self.last)['ok'])
+
+    def test_an_implementation_run_may_end_without_text(self):
+        claude = json.dumps(dict(type='result', subtype='success', result=''))
+        result = w.parse_result('claude', 0, claude, '', self.last, require_text=False)
+        self.assertTrue(result['ok'])
+        self.assertIsNone(result['error'])
+
+    def test_main_enforces_text_for_read_only_runs_only(self):
+        empty = json.dumps(dict(status='SUCCESS', response='', conversation_id='c'))
+        for flags, expected in [([], 1), (['--write'], 0)]:
+            with patch.object(w, 'check_subscription'), patch.object(w, 'launch', return_value=(0, empty, '')):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(w.main(['agy', '--prompt', 'x', *flags]), expected)
+
     def test_codex_completion_and_failure(self):
         rows = [dict(type='thread.started', thread_id='session'),
                 dict(type='item.completed', item=dict(type='agent_message', text='answer')),

@@ -50,6 +50,8 @@ and the [CLI reference](https://code.claude.com/docs/en/cli-reference).
 - The current timeout default is `0` (unlimited); older versions defaulted to five
   minutes. Always set an explicit deadline. The runner also enforces a host deadline.
 - JSON success has `status: SUCCESS`, `response`, `usage`, and `conversation_id`.
+  `status` can be `SUCCESS` with an empty `response` and a `denied_actions` list when the run
+  needed a tool that headless mode cannot approve; the runner reports that as a failure.
   Otherwise read `error`; do not turn an error response into a model opinion.
 - `--conversation ID` resumes a specific conversation. Avoid `--continue` when
   concurrent calls could make "the latest conversation" ambiguous.
